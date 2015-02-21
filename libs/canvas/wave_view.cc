@@ -691,7 +691,6 @@ WaveView::draw_image (Cairo::RefPtr<Cairo::ImageSurface>& image, PeakData* _peak
 
 boost::shared_ptr<WaveViewCache::Entry>
 WaveView::cache_request_result (boost::shared_ptr<WaveViewThreadRequest> req) const
-
 {
 	boost::shared_ptr<WaveViewCache::Entry> ret (new WaveViewCache::Entry (req->channel,
 	                                                                       req->height,
@@ -763,6 +762,58 @@ WaveView::get_image (framepos_t start, framepos_t end) const
 		
 		ret = get_image_from_cache (start, end);
 
+	}
+}
+
+BaseUI::RequestType ArdourCanvas::WaveView::GetImage = BaseUI::new_request_type();
+
+struct WaveViewThreadRequest : public PBD::EventLoop::BaseRequestObject
+{
+  public:
+	WaveViewThreadRequest  () : stop (0) {}
+	
+	bool should_stop () const { return (bool) g_atomic_int_get (&stop); }
+	void cancel() const { g_atomic_int_set (&stop, 1); }
+
+	framepos_t start;
+	framepos_t end;
+	double     width;
+	double     samples_per_pixel;
+	uint16_t   channel;
+	boost::weak_ptr<ARDOUR::Region> region;
+	
+  private:
+	gint stop; /* intended for atomic access */
+};
+
+
+WaveView::queue_get_image (Cairo::RefPtr<Cairo::ImageSurface>& image, framepos_t start, framepos_t end)
+{
+	WaveViewThreadRequest* req = get_request (GetImage);
+
+	req->the_slot = boost::bind (&WaveView::queue_draw, this);
+	req->start = start;
+	req->end = end;
+	req->width = _width;
+	req->samples_per_pixel = _samples_per_pixel;
+	req->region = _region;
+	req->channel = _channel;
+	req->height = _height;
+	req->fill = _fill_color;
+	req->region_amplitude = _region_amplitude;
+
+	send_request (&req);
+}
+
+
+void
+WaveView::thread_get_image (WaveViewThreadRequest& req)
+{
+	boost::shared_ptr<ARDOUR::Region> region = req.region.lock ();
+
+	if (!region) {
+		/* Region deleted, request is invalid */
+		return;
 	}
 
 	if (!ret) {
