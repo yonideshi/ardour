@@ -712,8 +712,8 @@ WaveView::draw_image (Cairo::RefPtr<Cairo::ImageSurface>& image, PeakData* _peak
 
 }
 
-void
-WaveView::get_image (Cairo::RefPtr<Cairo::ImageSurface>& image, framepos_t start, framepos_t end, double& image_offset) const
+bool
+WaveView::get_image_from_cache (Cairo::RefPtr<Cairo::ImageSurface>& image, framepos_t start, framepos_t end, double& image_offset) const
 {
 	vector <CacheEntry> caches;
 
@@ -744,15 +744,67 @@ WaveView::get_image (Cairo::RefPtr<Cairo::ImageSurface>& image, framepos_t start
 			return;
 		}
 	}
+}
 
-	consolidate_image_cache ();
+BaseUI::RequestType ArdourCanvas::WaveView::GetImage = BaseUI::new_request_type();
+
+struct WaveViewThreadRequest : public PBD::EventLoop::BaseRequestObject
+{
+  public:
+	WaveViewThreadRequest  () : stop (0) {}
+	
+	bool should_stop () const { return (bool) g_atomic_int_get (&stop); }
+	void cancel() const { g_atomic_int_set (&stop, 1); }
+
+	framepos_t start;
+	framepos_t end;
+	double     width;
+	double     samples_per_pixel;
+	uint16_t   channel;
+	boost::weak_ptr<ARDOUR::Region> region;
+	
+  private:
+	gint stop; /* intended for atomic access */
+};
+
+
+WaveView::queue_get_image (Cairo::RefPtr<Cairo::ImageSurface>& image, framepos_t start, framepos_t end)
+{
+	WaveViewThreadRequest* req = get_request (GetImage);
+
+	req->the_slot = boost::bind (&WaveView::queue_draw, this);
+	req->start = start;
+	req->end = end;
+	req->width = _width;
+	req->samples_per_pixel = _samples_per_pixel;
+	req->region = _region;
+	req->channel = _channel;
+	req->height = _height;
+	req->fill = _fill_color;
+	req->region_amplitude = _region_amplitude;
+
+	send_request (&req);
+}
+
+
+void
+WaveView::thread_get_image (WaveViewThreadRequest& req)
+{
+	boost::shared_ptr<ARDOUR::Region> region = req.region.lock ();
+
+	if (!region) {
+		/* Region deleted, request is invalid */
+		return;
+	}
+
+	// consolidate_image_cache ();
 
 	/* sample position is canonical here, and we want to generate
 	 * an image that spans about twice the canvas width
 	 */
 
-	const framepos_t center = start + ((end - start) / 2);
-	const framecnt_t canvas_samples = _canvas->visible_area().width() * _samples_per_pixel; /* one canvas width */
+	const framepos_t center = req.start + ((req.end - req.start) / 2);
+	const framecnt_t canvas_samples = req.width * req.samples_per_pixel; /* one canvas width */
 
 	/* we can request data from anywhere in the Source, between 0 and its length
 	 */
@@ -760,22 +812,22 @@ WaveView::get_image (Cairo::RefPtr<Cairo::ImageSurface>& image, framepos_t start
 	framepos_t sample_start = max ((framepos_t) 0, (center - canvas_samples));
 	framepos_t sample_end = min (center + canvas_samples, _region->source_length (0));
 
-	const int n_peaks = llrintf ((sample_end - sample_start)/ (double) _samples_per_pixel);
-
+	const int n_peaks = llrintf ((sample_end - sample_start)/ (req.samples_per_pixel));
+	
 	boost::scoped_array<ARDOUR::PeakData> peaks (new PeakData[n_peaks]);
-
-	_region->read_peaks (peaks.get(), n_peaks,
-			     sample_start, sample_end - sample_start,
-			     _channel,
-			     _samples_per_pixel);
-
-	image = Cairo::ImageSurface::create (Cairo::FORMAT_ARGB32, n_peaks, _height);
-
+	
+	req.region->read_peaks (peaks.get(), n_peaks,
+	                        sample_start, sample_end - sample_start,
+	                        req.channel,
+	                        req.samples_per_pixel);
+	
+	Cairo::RefPtr<Cairo::ImageSurface> image = Cairo::ImageSurface::create (Cairo::FORMAT_ARGB32, n_peaks, _height);
+	
 	draw_image (image, peaks.get(), n_peaks);
+	
+	_image_cache[region->audio_source ()].push_back (CacheEntry (req.channel,req.height, req.region_amplitude, req.fill, sample_start,  sample_end, image));
 
-	_image_cache[_region->audio_source ()].push_back (CacheEntry (_channel, _height, _region_amplitude, _fill_color, sample_start,  sample_end, image));
-
-	image_offset = (sample_start - _region->start()) / _samples_per_pixel;
+	req.image_offset = (sample_start - region->start()) / req.samples_per_pixel;
 
 	//cerr << "_image_cache size is : " << _image_cache.size() << " entries for this audiosource : " << _image_cache.find (_region->audio_source ())->second.size() << endl;
 
