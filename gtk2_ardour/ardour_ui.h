@@ -73,6 +73,7 @@
 #include "ardour_window.h"
 #include "editing.h"
 #include "engine_dialog.h"
+#include "export_video_dialog.h"
 #include "meterbridge.h"
 #include "ui_config.h"
 #include "enums.h"
@@ -243,6 +244,7 @@ class ARDOUR_UI : public Gtkmm2ext::UI, public ARDOUR::SessionHandlePtr
 	bool start_video_server (Gtk::Window* float_window, bool popup_msg);
 	void stop_video_server (bool ask_confirm=false);
 	void flush_videotimeline_cache (bool localcacheonly=false);
+	void export_video (bool range = false);
 
 	void session_add_audio_track (
 		int input_channels,
@@ -455,6 +457,7 @@ class ARDOUR_UI : public Gtkmm2ext::UI, public ARDOUR::SessionHandlePtr
 	ArdourButton auditioning_alert_button;
 	ArdourButton solo_alert_button;
 	ArdourButton feedback_alert_button;
+	ArdourButton error_alert_button;
 
 	Gtk::VBox alert_box;
 	Gtk::VBox meter_box;
@@ -470,6 +473,7 @@ class ARDOUR_UI : public Gtkmm2ext::UI, public ARDOUR::SessionHandlePtr
 	void sync_blink (bool);
 	void audition_blink (bool);
 	void feedback_blink (bool);
+	void error_blink (bool);
 	
 	void set_flat_buttons();
 
@@ -480,6 +484,7 @@ class ARDOUR_UI : public Gtkmm2ext::UI, public ARDOUR::SessionHandlePtr
 	bool solo_alert_press (GdkEventButton* ev);
 	bool audition_alert_press (GdkEventButton* ev);
 	bool feedback_alert_press (GdkEventButton *);
+	bool error_alert_press (GdkEventButton *);
 
 	void big_clock_value_changed ();
 	void primary_clock_value_changed ();
@@ -607,7 +612,7 @@ class ARDOUR_UI : public Gtkmm2ext::UI, public ARDOUR::SessionHandlePtr
 
 	void snapshot_session (bool switch_to_it);
 	void rename_session ();
-	void setup_order_hint ();
+	void setup_order_hint (AddRouteDialog::InsertAt);
 
 	int         create_mixer ();
 	int         create_editor ();
@@ -624,6 +629,7 @@ class ARDOUR_UI : public Gtkmm2ext::UI, public ARDOUR::SessionHandlePtr
         WM::Proxy<LocationUIWindow> location_ui;
         WM::Proxy<RouteParams_UI> route_params;
         WM::Proxy<EngineControl> audio_midi_setup;
+        WM::Proxy<ExportVideoDialog> export_video_dialog;
 
         /* Windows/Dialogs that require a creator method */
 
@@ -728,7 +734,6 @@ class ARDOUR_UI : public Gtkmm2ext::UI, public ARDOUR::SessionHandlePtr
 			const char *msg);
 	Gtk::Label status_bar_label;
         bool status_bar_button_press (GdkEventButton*);
-	Gtk::ToggleButton error_log_button;
 
 	void loading_message (const std::string& msg);
 
@@ -765,6 +770,15 @@ class ARDOUR_UI : public Gtkmm2ext::UI, public ARDOUR::SessionHandlePtr
 
 	void successful_graph_sort ();
 	bool _feedback_exists;
+
+	enum ArdourLogLevel {
+		LogLevelNone = 0,
+		LogLevelInfo,
+		LogLevelWarning,
+		LogLevelError
+	};
+
+	ArdourLogLevel _log_not_acknowledged;
 
 	void resize_text_widgets ();
 

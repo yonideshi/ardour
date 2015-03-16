@@ -37,6 +37,10 @@
 #include <errno.h>
 #include <time.h>
 
+#ifdef PLATFORM_WINDOWS
+#include <windows.h> // for LARGE_INTEGER
+#endif
+
 #ifdef WINDOWS_VST_SUPPORT
 #include <fst.h>
 #endif
@@ -85,6 +89,7 @@
 #include "ardour/audioregion.h"
 #include "ardour/buffer_manager.h"
 #include "ardour/control_protocol_manager.h"
+#include "ardour/directory_names.h"
 #include "ardour/event_type_map.h"
 #include "ardour/filesystem_paths.h"
 #include "ardour/midi_region.h"
@@ -131,6 +136,7 @@ PBD::Signal1<void,std::string> ARDOUR::BootMessage;
 PBD::Signal3<void,std::string,std::string,bool> ARDOUR::PluginScanMessage;
 PBD::Signal1<void,int> ARDOUR::PluginScanTimeout;
 PBD::Signal0<void> ARDOUR::GUIIdle;
+PBD::Signal3<bool,std::string,std::string,int> ARDOUR::CopyConfigurationFiles;
 
 namespace ARDOUR {
 extern void setup_enum_writer ();
@@ -238,6 +244,104 @@ lotsa_files_please ()
 #endif
 }
 
+static int
+copy_configuration_files (string const & old_dir, string const & new_dir, int old_version)
+{
+	string old_name;
+	string new_name;
+
+	/* ensure target directory exists */
+
+	if (g_mkdir_with_parents (new_dir.c_str(), 0755)) {
+		return -1;
+	}
+	
+	if (old_version == 3) {
+	
+		old_name = Glib::build_filename (old_dir, X_("recent"));
+		new_name = Glib::build_filename (new_dir, X_("recent"));
+
+		copy_file (old_name, new_name);
+
+		/* can only copy ardour.rc - UI config is not compatible */
+
+		old_name = Glib::build_filename (old_dir, X_("ardour.rc"));
+		new_name = Glib::build_filename (new_dir, X_("config"));
+
+		copy_file (old_name, new_name);
+
+		/* copy templates and route templates */
+
+		old_name = Glib::build_filename (old_dir, X_("templates"));
+		new_name = Glib::build_filename (new_dir, X_("templates"));
+
+		copy_recurse (old_name, new_name);
+
+		old_name = Glib::build_filename (old_dir, X_("route_templates"));
+		new_name = Glib::build_filename (new_dir, X_("route_templates"));
+
+		copy_recurse (old_name, new_name);
+
+		/* presets */
+
+		old_name = Glib::build_filename (old_dir, X_("presets"));
+		new_name = Glib::build_filename (new_dir, X_("presets"));
+		
+		copy_recurse (old_name, new_name);
+
+		/* presets */
+
+		old_name = Glib::build_filename (old_dir, X_("plugin_statuses"));
+		new_name = Glib::build_filename (new_dir, X_("plugin_statuses"));
+
+		copy_file (old_name, new_name);
+		
+		/* export formats */
+
+		old_name = Glib::build_filename (old_dir, export_formats_dir_name);
+		new_name = Glib::build_filename (new_dir, export_formats_dir_name);
+		
+		vector<string> export_formats;
+		g_mkdir_with_parents (Glib::build_filename (new_dir, export_formats_dir_name).c_str(), 0755);
+		find_files_matching_pattern (export_formats, old_name, X_("*.format"));
+		for (vector<string>::iterator i = export_formats.begin(); i != export_formats.end(); ++i) {
+			std::string from = *i;
+			std::string to = Glib::build_filename (new_name, Glib::path_get_basename (*i));
+			copy_file (from, to);
+		}
+	}
+
+	return 0;
+}
+
+int
+ARDOUR::check_for_old_configuration_files (boost::function<bool (std::string const&, std::string const&, int)> ui_handler)
+{
+	int current_version = atoi (X_(PROGRAM_VERSION));
+	
+	if (current_version <= 1) {
+		return 0;
+	}
+
+	int old_version = current_version - 1;
+
+	string old_config_dir = user_config_directory (old_version);
+	/* pass in the current version explicitly to avoid creation */
+	string current_config_dir = user_config_directory (current_version); 
+
+	if (!Glib::file_test (current_config_dir, Glib::FILE_TEST_IS_DIR)) {
+		if (Glib::file_test (old_config_dir, Glib::FILE_TEST_IS_DIR)) {
+			
+			if (ui_handler (old_config_dir, current_config_dir, old_version)) {
+				copy_configuration_files (old_config_dir, current_config_dir, old_version);
+				return 1;
+			}
+		}
+	}
+
+	return 0;
+}
+
 bool
 ARDOUR::init (bool use_windows_vst, bool try_optimization, const char* localedir)
 {
@@ -328,7 +432,9 @@ ARDOUR::init (bool use_windows_vst, bool try_optimization, const char* localedir
 
 	/* singletons - first object is "it" */
 	(void) PluginManager::instance();
+#ifdef LV2_SUPPORT
 	(void) URIMap::instance();
+#endif
 	(void) EventTypeMap::instance();
 
         ProcessThread::init ();

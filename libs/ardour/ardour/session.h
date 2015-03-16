@@ -243,7 +243,7 @@ class LIBARDOUR_API Session : public PBD::StatefulDestructible, public PBD::Scop
 		bool operator() (boost::shared_ptr<Route>, boost::shared_ptr<Route> b);
 	};
 
-	void set_order_hint (uint32_t order_hint) {_order_hint = order_hint;};
+	void set_order_hint (int32_t order_hint) {_order_hint = order_hint;};
 	void notify_remote_id_change ();
 	void sync_order_keys ();
 
@@ -716,12 +716,11 @@ class LIBARDOUR_API Session : public PBD::StatefulDestructible, public PBD::Scop
 
 	/* I/O bundles */
 
-	void add_bundle (boost::shared_ptr<Bundle>);
+	void add_bundle (boost::shared_ptr<Bundle>, bool emit_signal = true);
 	void remove_bundle (boost::shared_ptr<Bundle>);
 	boost::shared_ptr<Bundle> bundle_by_name (std::string) const;
 
-	PBD::Signal1<void,boost::shared_ptr<Bundle> > BundleAdded;
-	PBD::Signal1<void,boost::shared_ptr<Bundle> > BundleRemoved;
+	PBD::Signal0<void> BundleAddedOrRemoved;
 
 	void midi_panic ();
 
@@ -993,6 +992,7 @@ class LIBARDOUR_API Session : public PBD::StatefulDestructible, public PBD::Scop
 	double                  _transport_speed;
 	double                  _default_transport_speed;
 	double                  _last_transport_speed;
+	double                  _signalled_varispeed;
 	double                  _target_transport_speed;
 	CubicInterpolation       interpolation;
 
@@ -1677,7 +1677,7 @@ class LIBARDOUR_API Session : public PBD::StatefulDestructible, public PBD::Scop
 	GraphEdges _current_route_graph;
 
 	uint32_t next_control_id () const;
-	uint32_t _order_hint;
+	int32_t _order_hint;
 	bool ignore_route_processor_changes;
 
 	MidiClockTicker* midi_clock;

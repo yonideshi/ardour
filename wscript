@@ -124,6 +124,7 @@ compiler_flags_dictionaries['clang'] = clang_dict;
 
 clang_darwin_dict = compiler_flags_dictionaries['clang'].copy();
 clang_darwin_dict['cxx-strict'] = [ '-ansi', '-Wnon-virtual-dtor', '-Woverloaded-virtual', ]
+clang_darwin_dict['full-optimization'] = [ '-O3', '-ffast-math', '-fstrength-reduce' ]
 compiler_flags_dictionaries['clang-darwin'] = clang_darwin_dict;
 
 def fetch_git_revision ():
@@ -572,7 +573,7 @@ def options(opt):
     opt.add_option('--arch', type='string', action='store', dest='arch',
                     help='Architecture-specific compiler FLAGS')
     opt.add_option('--with-backends', type='string', action='store', default='jack', dest='with_backends',
-                    help='Specify which backend modules are to be included(jack,alsa,wavesaudio,dummy)')
+                    help='Specify which backend modules are to be included(jack,alsa,wavesaudio,dummy,coreaudio)')
     opt.add_option('--backtrace', action='store_true', default=True, dest='backtrace',
                     help='Compile with -rdynamic -- allow obtaining backtraces from within Ardour')
     opt.add_option('--no-carbon', action='store_true', default=False, dest='nocarbon',
@@ -597,6 +598,8 @@ def options(opt):
                     help='Compile for use with gprofile')
     opt.add_option('--libjack', type='string', default="auto", dest='libjack_link',
                     help='libjack link mode  [auto|link|weak]')
+    opt.add_option('--no-jack-metadata', action='store_false', default=True, dest='libjack_meta',
+                    help='disable support for jack metadata')
     opt.add_option('--internal-shared-libs', action='store_true', default=True, dest='internal_shared_libs',
                    help='Build internal libs as shared libraries')
     opt.add_option('--internal-static-libs', action='store_false', dest='internal_shared_libs',
@@ -797,7 +800,12 @@ def configure(conf):
         conf.env.append_value('LINKFLAGS_AUDIOUNITS', ['-framework', 'AudioToolbox', '-framework', 'AudioUnit'])
         conf.env.append_value('LINKFLAGS_AUDIOUNITS', ['-framework', 'Cocoa'])
 
-        if re.search ("^[1-9][0-9]\.", os.uname()[2]) == None and not Options.options.nocarbon:
+        if (
+                # osx up to and including 10.6 (uname 10.X.X)
+                (re.search ("^[1-9][0-9]\.", os.uname()[2]) == None or not re.search ("^10\.", os.uname()[2]) == None)
+                and (Options.options.generic or Options.options.ppc)
+                and not Options.options.nocarbon
+           ):
             conf.env.append_value('CXXFLAGS_AUDIOUNITS', "-DWITH_CARBON")
             conf.env.append_value('LINKFLAGS_AUDIOUNITS', ['-framework', 'Carbon'])
         else:
@@ -958,6 +966,24 @@ def configure(conf):
     conf.env['BUILD_ALSABACKEND'] = any('alsa' in b for b in backends)
     conf.env['BUILD_DUMMYBACKEND'] = any('dummy' in b for b in backends)
     conf.env['BUILD_WAVESBACKEND'] = any('wavesaudio' in b for b in backends)
+    conf.env['BUILD_CORECRAPPITA'] = any('coreaudio' in b for b in backends)
+
+    if conf.env['BUILD_CORECRAPPITA'] and conf.env['BUILD_WAVESBACKEND']:
+        print("Coreaudio + Waves Backend are mutually exclusive")
+        sys.exit(1)
+
+    if sys.platform != 'darwin' and conf.env['BUILD_CORECRAPPITA']:
+        print("Coreaudio backend is only available for OSX")
+        sys.exit(1)
+
+    if re.search ("linux", sys.platform) != None and Options.options.dist_target != 'mingw' and conf.env['BUILD_WAVESBACKEND']:
+        print("Waves Backend is not for Linux")
+        sys.exit(1)
+
+    if re.search ("linux", sys.platform) == None and conf.env['BUILD_ALSABACKEND']:
+        print("ALSA Backend is only available on Linux")
+        sys.exit(1)
+
 
     set_compiler_flags (conf, Options.options)
 
@@ -1003,6 +1029,7 @@ const char* const ardour_config_info = "\\n\\
     write_config_text('No plugin state',       conf.is_defined('NO_PLUGIN_STATE'))
     write_config_text('Build target',          conf.env['build_target'])
     write_config_text('CoreAudio',             conf.is_defined('HAVE_COREAUDIO'))
+    write_config_text('CoreAudio/Midi Backend',conf.env['BUILD_CORECRAPPITA'])
     write_config_text('Debug RT allocations',  conf.is_defined('DEBUG_RT_ALLOC'))
     write_config_text('Debug Symbols',         conf.is_defined('debug_symbols') or conf.env['DEBUG'])
     write_config_text('Dummy backend',         conf.env['BUILD_DUMMYBACKEND'])
@@ -1013,6 +1040,7 @@ const char* const ardour_config_info = "\\n\\
     write_config_text('Freedesktop files',     opts.freedesktop)
     write_config_text('JACK Backend',          conf.env['BUILD_JACKBACKEND'])
     write_config_text('Libjack linking',       conf.env['libjack_link'])
+    write_config_text('Libjack metadata',      not conf.is_defined('NO_JACK_METADATA'))
     write_config_text('LV2 UI embedding',      conf.is_defined('HAVE_SUIL'))
     write_config_text('LV2 support',           conf.is_defined('LV2_SUPPORT'))
     write_config_text('LXVST support',         conf.is_defined('LXVST_SUPPORT'))

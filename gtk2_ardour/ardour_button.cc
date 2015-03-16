@@ -77,6 +77,8 @@ ArdourButton::ArdourButton (Element e)
 	, text_inactive_color(0)
 	, led_active_color(0)
 	, led_inactive_color(0)
+	, led_custom_color (0)
+	, use_custom_led_color (false)
 	, convex_pattern (0)
 	, concave_pattern (0)
 	, led_inset_pattern (0)
@@ -113,6 +115,8 @@ ArdourButton::ArdourButton (const std::string& str, Element e)
 	, text_inactive_color(0)
 	, led_active_color(0)
 	, led_inactive_color(0)
+	, led_custom_color (0)
+	, use_custom_led_color (false)
 	, convex_pattern (0)
 	, concave_pattern (0)
 	, led_inset_pattern (0)
@@ -207,6 +211,10 @@ ArdourButton::render (cairo_t* cr, cairo_rectangle_t *)
 	} else {
 		text_color = text_inactive_color;
 		led_color = led_inactive_color;
+	}
+
+	if (use_custom_led_color) {
+		led_color = led_custom_color;
 	}
 
 	void (*rounded_function)(cairo_t*, double, double, double, double, double);
@@ -1085,7 +1093,7 @@ ArdourButton::action_sensitivity_changed ()
 }
 
 void
-ArdourButton::set_layout_ellisize_width (int w)
+ArdourButton::set_layout_ellipsize_width (int w)
 {
 	if (_layout_ellipsize_width == w) {
 		return;
@@ -1094,8 +1102,11 @@ ArdourButton::set_layout_ellisize_width (int w)
 	if (!_layout) {
 		return;
 	}
-	if (_layout_ellipsize_width > 0) {
-	_layout->set_width (_layout_ellipsize_width);
+	if (_layout_ellipsize_width > 3 * PANGO_SCALE) {
+		_layout->set_width (_layout_ellipsize_width - 3 * PANGO_SCALE);
+	}
+	if (is_realized ()) {
+		queue_resize ();
 	}
 }
 
@@ -1110,8 +1121,8 @@ ArdourButton::set_text_ellipsize (Pango::EllipsizeMode e)
 		return;
 	}
 	_layout->set_ellipsize(_ellipsis);
-	if (_layout_ellipsize_width > 0) {
-		_layout->set_width (_layout_ellipsize_width);
+	if (_layout_ellipsize_width > 3 * PANGO_SCALE) {
+		_layout->set_width (_layout_ellipsize_width - 3 * PANGO_SCALE);
 	}
 	if (is_realized ()) {
 		queue_resize ();
@@ -1125,8 +1136,8 @@ ArdourButton::ensure_layout ()
 		ensure_style ();
 		_layout = Pango::Layout::create (get_pango_context());
 		_layout->set_ellipsize(_ellipsis);
-		if (_layout_ellipsize_width > 0) {
-			_layout->set_width (_layout_ellipsize_width);
+		if (_layout_ellipsize_width > 3 * PANGO_SCALE) {
+			_layout->set_width (_layout_ellipsize_width - 3* PANGO_SCALE);
 		}
 	}
 }

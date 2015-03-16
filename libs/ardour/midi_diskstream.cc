@@ -135,6 +135,7 @@ MidiDiskstream::init ()
 	_capture_buf = new MidiRingBuffer<framepos_t>(size);
 
 	_n_channels = ChanCount(DataType::MIDI, 1);
+	interpolation.add_channel_to (0,0);
 }
 
 MidiDiskstream::~MidiDiskstream ()
@@ -522,24 +523,35 @@ MidiDiskstream::process (BufferSet& bufs, framepos_t transport_frame, pframes_t 
 
 		playback_distance = nframes;
 
+	} else if (_actual_speed != 1.0f && _target_speed > 0) {
+
+		interpolation.set_speed (_target_speed);
+
+		playback_distance = interpolation.distance  (nframes);
+
 	} else {
-
-		/* XXX: should be doing varispeed stuff here, similar to the code in AudioDiskstream::process */
-
 		playback_distance = nframes;
-
 	}
 
 	if (need_disk_signal) {
 		/* copy the diskstream data to all output buffers */
 		
 		MidiBuffer& mbuf (bufs.get_midi (0));
-		get_playback (mbuf, nframes);
-		
+		get_playback (mbuf, playback_distance);
+
 		/* leave the audio count alone */
 		ChanCount cnt (DataType::MIDI, 1);
 		cnt.set (DataType::AUDIO, bufs.count().n_audio());
 		bufs.set_count (cnt);
+
+		/* vari-speed */
+		if (_target_speed > 0 && _actual_speed != 1.0f) {
+			MidiBuffer& mbuf (bufs.get_midi (0));
+			for (MidiBuffer::iterator i = mbuf.begin(); i != mbuf.end(); ++i) {
+				MidiBuffer::TimeType *tme = i.timeptr();
+				*tme = (*tme) * nframes / playback_distance;
+			}
+		}
 	}
 
 	return 0;
@@ -550,7 +562,10 @@ MidiDiskstream::calculate_playback_distance (pframes_t nframes)
 {
 	frameoffset_t playback_distance = nframes;
 
-	/* XXX: should be doing varispeed stuff once it's implemented in ::process() above */
+	if (!record_enabled() && _actual_speed != 1.0f && _actual_speed > 0.f) {
+		interpolation.set_speed (_target_speed);
+		playback_distance = interpolation.distance (nframes, false);
+	}
 
 	if (_actual_speed < 0.0) {
 		return -playback_distance;
@@ -563,6 +578,10 @@ bool
 MidiDiskstream::commit (framecnt_t playback_distance)
 {
 	bool need_butler = false;
+
+	if (!_io || !_io->active()) {
+		return false;
+	}
 
 	if (_actual_speed < 0.0) {
 		playback_sample -= playback_distance;
@@ -591,10 +610,33 @@ MidiDiskstream::commit (framecnt_t playback_distance)
 	 * need the butler is done correctly.
 	 */
 	
+	/* furthermore..
+	 *
+	 * Doing heavy GUI operations[1] can stall also the butler.
+	 * The RT-thread meanwhile will happily continue and
+	 * ‘frames_read’ (from buffer to output) will become larger
+	 * than ‘frames_written’ (from disk to buffer).
+	 *
+	 * The disk-stream is now behind..
+	 *
+	 * In those cases the butler needs to be summed to refill the buffer (done now)
+	 * AND we need to skip (frames_read - frames_written). ie remove old events
+	 * before playback_sample from the rinbuffer.
+	 *
+	 * [1] one way to do so is described at #6170.
+	 * For me just popping up the context-menu on a MIDI-track header
+	 * of a track with a large (think beethoven :) midi-region also did the
+	 * trick. The playhead stalls for 2 or 3 sec, until the context-menu shows.
+	 *
+	 * In both cases the root cause is that redrawing MIDI regions on the GUI is still very slow
+	 * and can stall
+	 */
 	if (frames_read <= frames_written) {
 		if ((frames_written - frames_read) + playback_distance < midi_readahead) {
 			need_butler = true;
 		}
+	} else {
+		need_butler = true;
 	}
 
 
@@ -797,16 +839,17 @@ MidiDiskstream::do_refill ()
 
 	uint32_t frames_read = g_atomic_int_get(&_frames_read_from_ringbuffer);
 	uint32_t frames_written = g_atomic_int_get(&_frames_written_to_ringbuffer);
-	if ((frames_written - frames_read) >= midi_readahead) {
+	if ((frames_read < frames_written) && (frames_written - frames_read) >= midi_readahead) {
 		return 0;
 	}
 
-	framecnt_t to_read = midi_readahead - (frames_written - frames_read);
+	framecnt_t to_read = midi_readahead - ((framecnt_t)frames_written - (framecnt_t)frames_read);
 
 	//cout << "MDS read for midi_readahead " << to_read << "  rb_contains: "
 	//	<< frames_written - frames_read << endl;
 
-	to_read = (framecnt_t) min ((framecnt_t) to_read, (framecnt_t) (max_framepos - file_frame));
+	to_read = min (to_read, (framecnt_t) (max_framepos - file_frame));
+	to_read = min (to_read, (framecnt_t) write_space);
 
 	if (read (file_frame, to_read, reversed)) {
 		ret = -1;
@@ -1416,6 +1459,8 @@ MidiDiskstream::get_playback (MidiBuffer& dst, framecnt_t nframes)
 			_playback_buf->resolve_tracker (dst, 0);
 		}
 
+		_playback_buf->skip_to (effective_start);
+
 		if (loc->end() >= effective_start && loc->end() < effective_start + nframes) {
 			/* end of loop is within the range we are reading, so
 			   split the read in two, and lie about the location
@@ -1447,6 +1492,7 @@ MidiDiskstream::get_playback (MidiBuffer& dst, framecnt_t nframes)
 			events_read = _playback_buf->read (dst, effective_start, effective_start + nframes);
 		}
 	} else {
+		_playback_buf->skip_to (playback_sample);
 		events_read = _playback_buf->read (dst, playback_sample, playback_sample + nframes);
 	}
 

@@ -105,6 +105,8 @@ typedef uint64_t microseconds_t;
 #include "big_clock_window.h"
 #include "bundle_manager.h"
 #include "engine_dialog.h"
+#include "export_video_dialog.h"
+#include "export_video_infobox.h"
 #include "gain_meter.h"
 #include "global_port_matrix.h"
 #include "gui_object.h"
@@ -155,6 +157,21 @@ ARDOUR_UI *ARDOUR_UI::theArdourUI = 0;
 sigc::signal<void, framepos_t, bool, framepos_t> ARDOUR_UI::Clock;
 sigc::signal<void>      ARDOUR_UI::CloseAllDialogs;
 
+
+static bool
+ask_about_configuration_copy (string const & old_dir, string const & new_dir, int version)
+{
+	MessageDialog msg (string_compose (_("%1 %2.x has discovered configuration files from %1 %3.x.\n\n"
+	                                     "Would you like to copy the relevant files before starting to use the program?\n\n"
+	                                     "(This will require you to restart %1.)"),
+	                                   PROGRAM_NAME, PROGRAM_VERSION, version), true);
+
+	msg.add_button (Gtk::Stock::NO, Gtk::RESPONSE_NO);
+	msg.show_all ();
+
+	return (msg.run() == Gtk::RESPONSE_OK);
+}
+
 ARDOUR_UI::ARDOUR_UI (int *argcp, char **argvp[], const char* localedir)
 
 	: Gtkmm2ext::UI (PROGRAM_NAME, argcp, argvp)
@@ -194,6 +211,7 @@ ARDOUR_UI::ARDOUR_UI (int *argcp, char **argvp[], const char* localedir)
 	, auditioning_alert_button (_("Audition"))
 	, solo_alert_button (_("Solo"))
 	, feedback_alert_button (_("Feedback"))
+	, error_alert_button ( ArdourButton::Element (ArdourButton::Edge | ArdourButton::Indicator) )
 
 	, editor_meter(0)
 	, editor_meter_peak_display()
@@ -206,6 +224,7 @@ ARDOUR_UI::ARDOUR_UI (int *argcp, char **argvp[], const char* localedir)
 	, location_ui (X_("locations"), _("Locations"))
 	, route_params (X_("inspector"), _("Tracks and Busses"))
 	, audio_midi_setup (X_("audio-midi-setup"), _("Audio/MIDI Setup"))
+	, export_video_dialog (X_("video-export"), _("Video Export Dialog"))
 	, session_option_editor (X_("session-options-editor"), _("Properties"), boost::bind (&ARDOUR_UI::create_session_option_editor, this))
 	, add_video_dialog (X_("add-video"), _("Add Tracks/Busses"), boost::bind (&ARDOUR_UI::create_add_video_dialog, this))
 	, bundle_manager (X_("bundle-manager"), _("Bundle Manager"), boost::bind (&ARDOUR_UI::create_bundle_manager, this))
@@ -213,13 +232,20 @@ ARDOUR_UI::ARDOUR_UI (int *argcp, char **argvp[], const char* localedir)
 	, audio_port_matrix (X_("audio-connection-manager"), _("Audio Connections"), boost::bind (&ARDOUR_UI::create_global_port_matrix, this, ARDOUR::DataType::AUDIO))
 	, midi_port_matrix (X_("midi-connection-manager"), _("MIDI Connections"), boost::bind (&ARDOUR_UI::create_global_port_matrix, this, ARDOUR::DataType::MIDI))
 
-	, error_log_button (_("Errors"))
-
 	, _status_bar_visibility (X_("status-bar"))
 	, _feedback_exists (false)
+	, _log_not_acknowledged (LogLevelNone)
 {
 	Gtkmm2ext::init(localedir);
 
+	if (ARDOUR::check_for_old_configuration_files (boost::bind (ask_about_configuration_copy, _1, _2, _3))) {
+		MessageDialog msg (string_compose (_("Your configuration files were copied. You can now restart %1."), PROGRAM_NAME), true);
+		msg.run ();
+		/* configuration was modified, exit immediately */
+		_exit (0);
+	}
+
+	
 	splash = 0;
 
 	_numpad_locate_happening = false;
@@ -358,6 +384,7 @@ ARDOUR_UI::ARDOUR_UI (int *argcp, char **argvp[], const char* localedir)
 		big_clock_window.set_state (*ui_xml);
 		audio_port_matrix.set_state (*ui_xml);
 		midi_port_matrix.set_state (*ui_xml);
+		export_video_dialog.set_state (*ui_xml);
 	}
 
 	WM::Manager::instance().register_window (&key_editor);
@@ -369,6 +396,7 @@ ARDOUR_UI::ARDOUR_UI (int *argcp, char **argvp[], const char* localedir)
 	WM::Manager::instance().register_window (&add_video_dialog);
 	WM::Manager::instance().register_window (&route_params);
 	WM::Manager::instance().register_window (&audio_midi_setup);
+	WM::Manager::instance().register_window (&export_video_dialog);
 	WM::Manager::instance().register_window (&bundle_manager);
 	WM::Manager::instance().register_window (&location_ui);
 	WM::Manager::instance().register_window (&big_clock_window);
@@ -434,7 +462,7 @@ ARDOUR_UI::engine_halted (const char* reason, bool free_reason)
 		   free it later.
 		*/
 		char *copy = strdup (reason);
-		Gtkmm2ext::UI::instance()->call_slot (invalidator (*this), boost::bind (&ARDOUR_UI::engine_halted, this, copy, true));
+		Gtkmm2ext::UI::instance()->call_slot (MISSING_INVALIDATOR, boost::bind (&ARDOUR_UI::engine_halted, this, copy, true));
 		return;
 	}
 
@@ -461,7 +489,6 @@ the audio backend and save the session."), PROGRAM_NAME);
 
 	MessageDialog msg (*editor, msgstr);
 	pop_back_splash (msg);
-	msg.set_keep_above (true);
 	msg.run ();
 	
 	if (free_reason) {
@@ -859,6 +886,50 @@ ARDOUR_UI::starting ()
 			}
 		}
 
+#ifdef NO_PLUGIN_STATE
+
+		ARDOUR::RecentSessions rs;
+		ARDOUR::read_recent_sessions (rs);
+
+		string path = Glib::build_filename (user_config_directory(), ".iknowaboutfreeversion");
+		
+		if (!Glib::file_test (path, Glib::FILE_TEST_EXISTS) && !rs.empty()) {
+			
+			/* already used Ardour, have sessions ... warn about plugin state */
+			
+			ArdourDialog d (_("Free/Demo Version Warning"), true);
+			Label l;
+			LinkButton b (string_compose (_("Subscribe and support development of %1"), PROGRAM_NAME));
+			CheckButton c (_("Don't warn me about this again"));
+			
+			l.set_markup (string_compose (_("<span weight=\"bold\" size=\"large\">%1</span>\n\n<b>%2</b>\n\n<i>%3</i>\n\n%4"),
+			                              string_compose (_("This is a free/demo version of %1"), PROGRAM_NAME),
+			                              _("It will not restore OR save any plugin settings"),
+			                              _("If you load an existing session with plugin settings\n"
+			                                "they will not be used and will be lost."),
+			                              _("To get full access to updates without this limitation\n"
+			                                "consider become a subscriber for a low cost every month")));
+			l.set_justify (JUSTIFY_CENTER);
+			
+			b.set_uri (X_("https://community.ardour.org/s/subscribe "));
+			
+			d.get_vbox()->pack_start (l, true, true);
+			d.get_vbox()->pack_start (b, false, false, 12);
+			d.get_vbox()->pack_start (c, false, false, 12);
+			
+			d.add_button (_("Quit now"), RESPONSE_CANCEL);
+			d.add_button (string_compose (_("Continue using %1"), PROGRAM_NAME), RESPONSE_OK);
+			
+			d.show_all ();
+
+			c.signal_toggled().connect (sigc::hide_return (sigc::bind (sigc::ptr_fun (toggle_file_existence), path)));
+			
+			if (d.run () != RESPONSE_OK) {
+				_exit (0);
+			}
+		}
+#endif
+			
 		/* go get a session */
 
 		const bool new_session_required = (ARDOUR_COMMAND_LINE::new_session || brand_new_user);
@@ -1091,7 +1162,6 @@ ARDOUR_UI::ask_about_saving_session (const vector<string>& actions)
 	prompt_label.show();
 	dimage->show();
 	window.show();
-	window.set_keep_above (true);
 	window.present ();
 
 	ResponseType r = (ResponseType) window.run();
@@ -1136,7 +1206,8 @@ ARDOUR_UI::every_second ()
 void
 ARDOUR_UI::every_point_one_seconds ()
 {
-	shuttle_box->update_speed_display ();
+	// TODO get rid of this..
+	// ShuttleControl is updated directly via TransportStateChange signal
 }
 
 void
@@ -2261,6 +2332,7 @@ ARDOUR_UI::blink_handler (bool blink_on)
 	sync_blink (blink_on);
 	audition_blink (blink_on);
 	feedback_blink (blink_on);
+	error_blink (blink_on);
 }
 
 void
@@ -2439,6 +2511,10 @@ ARDOUR_UI::save_state (const string & name, bool switch_to_it)
 
 	_session->add_extra_xml (*node);
 
+	if (export_video_dialog) {
+		_session->add_extra_xml (export_video_dialog->get_state());
+	}
+
 	save_state_canfail (name, switch_to_it);
 }
 
@@ -2547,7 +2623,6 @@ ARDOUR_UI::edit_metadata ()
 {
 	SessionMetadataEditor dialog;
 	dialog.set_session (_session);
-	editor->ensure_float (dialog);
 	Keyboard::magic_widget_grab_focus ();
 	dialog.grab_focus ();
 	dialog.run ();
@@ -2559,7 +2634,6 @@ ARDOUR_UI::import_metadata ()
 {
 	SessionMetadataImporter dialog;
 	dialog.set_session (_session);
-	editor->ensure_float (dialog);
 	dialog.run ();
 }
 
@@ -2578,7 +2652,7 @@ ARDOUR_UI::ask_about_loading_existing_session (const std::string& session_path)
 	msg.set_name (X_("OpenExistingDialog"));
 	msg.set_title (_("Open Existing Session"));
 	msg.set_wmclass (X_("existing_session"), PROGRAM_NAME);
-	msg.set_position (Gtk::WIN_POS_MOUSE);
+	msg.set_position (Gtk::WIN_POS_CENTER);
 	pop_back_splash (msg);
 
 	switch (msg.run()) {
@@ -2972,7 +3046,6 @@ ARDOUR_UI::load_session (const std::string& path, const std::string& snap_name, 
 		                   Gtk::MESSAGE_INFO,
 		                   BUTTONS_OK);
 
-		msg.set_keep_above (true);
 		msg.set_title (_("Loading Error"));
 		msg.set_position (Gtk::WIN_POS_CENTER);
 		pop_back_splash (msg);
@@ -2996,8 +3069,7 @@ ARDOUR_UI::load_session (const std::string& path, const std::string& snap_name, 
 				   true,
 				   Gtk::MESSAGE_INFO,
 				   BUTTONS_OK);
-		
-		msg.set_keep_above (true);
+
 		msg.set_title (_("Read-only Session"));
 		msg.set_position (Gtk::WIN_POS_CENTER);
 		pop_back_splash (msg);
@@ -3414,7 +3486,7 @@ ARDOUR_UI::flush_trash ()
 }
 
 void
-ARDOUR_UI::setup_order_hint ()
+ARDOUR_UI::setup_order_hint (AddRouteDialog::InsertAt place)
 {
 	uint32_t order_hint = 0;
 
@@ -3422,7 +3494,7 @@ ARDOUR_UI::setup_order_hint ()
 	  we want the new routes to have their order keys set starting from 
 	  the highest order key in the selection + 1 (if available).
 	*/
-	if (add_route_dialog->get_transient_for () == mixer->get_toplevel()) {
+	if (place == AddRouteDialog::MixerSelection) {
 		for (RouteUISelection::iterator s = mixer->selection().routes.begin(); s != mixer->selection().routes.end(); ++s) {
 			if ((*s)->route()->order_key() > order_hint) {
 				order_hint = (*s)->route()->order_key();
@@ -3431,9 +3503,11 @@ ARDOUR_UI::setup_order_hint ()
 
 		if (!mixer->selection().routes.empty()) {
 			order_hint++;
+		} else {
+			return;
 		}
 
-	} else {
+	} else if (place == AddRouteDialog::EditorSelection){
 		for (TrackSelection::iterator s = editor->get_selection().tracks.begin(); s != editor->get_selection().tracks.end(); ++s) {
 			RouteTimeAxisView* tav = dynamic_cast<RouteTimeAxisView*> (*s);
 			if (tav && tav->route() && tav->route()->order_key() > order_hint) {
@@ -3443,17 +3517,26 @@ ARDOUR_UI::setup_order_hint ()
 
 		if (!editor->get_selection().tracks.empty()) {
 			order_hint++;
+		} else {
+			return;
 		}
+
+	} else if (place == AddRouteDialog::First) {
+		order_hint = 0;
+	} else {
+		/** AddRouteDialog::Last
+		 * not setting an order hint will place new routes last.
+		 */
+		return;
 	}
 
 	_session->set_order_hint (order_hint);
 
 	/* create a gap in the existing route order keys to accomodate new routes.*/
-
 	boost::shared_ptr <RouteList> rd = _session->get_routes();
 	for (RouteList::iterator ri = rd->begin(); ri != rd->end(); ++ri) {
 		boost::shared_ptr<Route> rt (*ri);
-			
+
 		if (rt->is_monitor()) {
 			continue;
 		}
@@ -3465,7 +3548,7 @@ ARDOUR_UI::setup_order_hint ()
 }
 
 void
-ARDOUR_UI::add_route (Gtk::Window* float_window)
+ARDOUR_UI::add_route (Gtk::Window* /* ignored */)
 {
 	int count;
 
@@ -3476,11 +3559,6 @@ ARDOUR_UI::add_route (Gtk::Window* float_window)
 	if (add_route_dialog->is_visible()) {
 		/* we're already doing this */
 		return;
-	}
-
-	if (float_window) {
-		add_route_dialog->unset_transient_for ();
-		add_route_dialog->set_transient_for (*float_window);
 	}
 
 	ResponseType r = (ResponseType) add_route_dialog->run ();
@@ -3499,7 +3577,7 @@ ARDOUR_UI::add_route (Gtk::Window* float_window)
 		return;
 	}
 
-	setup_order_hint();
+	setup_order_hint(add_route_dialog->insert_at());
 
 	string template_path = add_route_dialog->track_template();
 	DisplaySuspender ds;
@@ -3821,6 +3899,8 @@ ARDOUR_UI::remove_video ()
 	_session->add_extra_xml(*node);
 	node = new XMLNode(X_("Videomonitor"));
 	_session->add_extra_xml(*node);
+	node = new XMLNode(X_("Videoexport"));
+	_session->add_extra_xml(*node);
 	stop_video_server();
 }
 
@@ -3833,6 +3913,29 @@ ARDOUR_UI::flush_videotimeline_cache (bool localcacheonly)
 		video_timeline->flush_cache();
 	}
 	editor->queue_visual_videotimeline_update();
+}
+
+void
+ARDOUR_UI::export_video (bool range)
+{
+	if (ARDOUR::Config->get_show_video_export_info()) {
+		ExportVideoInfobox infobox (_session);
+		Gtk::ResponseType rv = (Gtk::ResponseType) infobox.run();
+		if (infobox.show_again()) {
+			ARDOUR::Config->set_show_video_export_info(false);
+		}
+		switch (rv) {
+			case GTK_RESPONSE_YES:
+				PBD::open_uri (ARDOUR::Config->get_reference_manual_url() + "/video-timeline/operations/#export");
+				break;
+			default:
+				break;
+		}
+	}
+	export_video_dialog->set_session (_session);
+	export_video_dialog->apply_state(editor->get_selection().time, range);
+	export_video_dialog->run ();
+	export_video_dialog->hide ();
 }
 
 XMLNode*
@@ -4188,6 +4291,7 @@ int
 ARDOUR_UI::reconnect_to_engine ()
 {
 	if (AudioEngine::instance()->start ()) {
+		// TODO somehow make this the topmost window (above any dialogs currently visible)
 		if (editor) {
 			MessageDialog msg (*editor,  _("Could not reconnect to the Audio/MIDI engine"));
 			msg.run ();

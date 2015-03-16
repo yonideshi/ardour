@@ -119,7 +119,7 @@ Click OK to exit %1."), PROGRAM_NAME, AudioEngine::instance()->current_backend_n
 	} else {
 
 		/* engine has already run, so this is a mid-session backend death */
-			
+
 		MessageDialog msg (string_compose (_("The audio backend (%1) has failed, or terminated"), AudioEngine::instance()->current_backend_name()), false);
 		msg.set_secondary_text (string_compose (_("%2 exited unexpectedly, and without notifying %1."),
 							 PROGRAM_NAME, AudioEngine::instance()->current_backend_name()));
@@ -132,8 +132,7 @@ Click OK to exit %1."), PROGRAM_NAME, AudioEngine::instance()->current_backend_n
 static void
 sigpipe_handler (int /*signal*/)
 {
-	/* XXX fix this so that we do this again after a reconnect to the backend
-	 */
+	/* XXX fix this so that we do this again after a reconnect to the backend */
 
 	static bool done_the_backend_thing = false;
 
@@ -145,15 +144,89 @@ sigpipe_handler (int /*signal*/)
 }
 #endif
 
-
 #if (!defined COMPILER_MSVC && defined PLATFORM_WINDOWS)
-static bool IsAConsolePort (HANDLE handle)
+
+static FILE* pStdOut = 0;
+static FILE* pStdErr = 0;
+static BOOL  bConsole;
+static HANDLE hStdOut;
+
+static bool
+IsAConsolePort (HANDLE handle)
 {
 	DWORD mode;
 	return (GetConsoleMode(handle, &mode) != 0);
 }
-#endif
 
+static void
+console_madness_begin ()
+{
+	bConsole = AttachConsole(ATTACH_PARENT_PROCESS);
+	hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+
+	/* re-attach to the console so we can see 'printf()' output etc.
+	 * for MSVC see  gtk2_ardour/msvc/winmain.cc
+	 */
+
+	if ((bConsole) && (IsAConsolePort(hStdOut))) {
+		pStdOut = freopen( "CONOUT$", "w", stdout );
+		pStdErr = freopen( "CONOUT$", "w", stderr );
+	}
+}
+
+static void
+console_madness_end ()
+{
+	if (pStdOut) {
+		fclose (pStdOut);
+	}
+	if (pStdErr) {
+		fclose (pStdErr);
+	}
+
+	if (bConsole) {
+		// Detach and free the console from our application
+		INPUT_RECORD input_record;
+
+		input_record.EventType = KEY_EVENT;
+		input_record.Event.KeyEvent.bKeyDown = TRUE;
+		input_record.Event.KeyEvent.dwControlKeyState = 0;
+		input_record.Event.KeyEvent.uChar.UnicodeChar = VK_RETURN;
+		input_record.Event.KeyEvent.wRepeatCount      = 1;
+		input_record.Event.KeyEvent.wVirtualKeyCode   = VK_RETURN;
+		input_record.Event.KeyEvent.wVirtualScanCode  = MapVirtualKey( VK_RETURN, 0 );
+
+		DWORD written = 0;
+		WriteConsoleInput( GetStdHandle( STD_INPUT_HANDLE ), &input_record, 1, &written );
+
+		FreeConsole();
+	}
+}
+
+static void command_line_parse_error (int *argc, char** argv[]) {}
+
+#elif (defined(COMPILER_MSVC) && defined(NDEBUG) && !defined(RDC_BUILD))
+
+// these are not used here. for MSVC see  gtk2_ardour/msvc/winmain.cc
+static void console_madness_begin () {}
+static void console_madness_end () {}
+
+static void command_line_parse_error (int *argc, char** argv[]) {
+	// Since we don't ordinarily have access to stdout and stderr with
+	// an MSVC app, let the user know we encountered a parsing error.
+	Gtk::Main app(&argc, &argv); // Calls 'gtk_init()'
+
+	Gtk::MessageDialog dlgReportParseError (_("\n   Ardour could not understand your command line      "),
+			false, MESSAGE_ERROR, BUTTONS_CLOSE, true);
+	dlgReportParseError.set_title (_("An error was encountered while launching Ardour"));
+	dlgReportParseError.run ();
+}
+
+#else
+static void console_madness_begin () {}
+static void console_madness_end () {}
+static void command_line_parse_error (int *argc, char** argv[]) {}
+#endif
 
 #if (defined(COMPILER_MSVC) && defined(NDEBUG) && !defined(RDC_BUILD))
 /*
@@ -190,19 +263,7 @@ int main (int argc, char *argv[])
 	gtk_set_locale ();
 #endif
 
-#if (!defined COMPILER_MSVC && defined PLATFORM_WINDOWS)
-	/* re-attach to the console so we can see 'printf()' output etc.
-	 * for MSVC see  gtk2_ardour/msvc/winmain.cc
-	 */
-	FILE  *pStdOut = 0, *pStdErr = 0;
-	BOOL  bConsole = AttachConsole(ATTACH_PARENT_PROCESS);
-	HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
-
-	if ((bConsole) && (IsAConsolePort(hStdOut))) {
-		pStdOut = freopen( "CONOUT$", "w", stdout );
-		pStdErr = freopen( "CONOUT$", "w", stderr );
-	}
-#endif
+	console_madness_begin();
 
 #if (defined WINDOWS_VST_SUPPORT && !defined PLATFORM_WINDOWS)
 	/* this does some magic that is needed to make GTK and X11 client interact properly.
@@ -238,16 +299,7 @@ int main (int argc, char *argv[])
 #endif
 
 	if (parse_opts (argc, argv)) {
-#if (defined(COMPILER_MSVC) && defined(NDEBUG) && !defined(RDC_BUILD))
-        // Since we don't ordinarily have access to stdout and stderr with
-        // an MSVC app, let the user know we encountered a parsing error.
-        Gtk::Main app(&argc, &argv); // Calls 'gtk_init()'
-
-        Gtk::MessageDialog dlgReportParseError (_("\n   Ardour could not understand your command line      "),
-                                                      false, MESSAGE_ERROR, BUTTONS_CLOSE, true);
-        dlgReportParseError.set_title (_("An error was encountered while launching Ardour"));
-		dlgReportParseError.run ();
-#endif
+		command_line_parse_error (&argc, &argv);
 		exit (1);
 	}
 
@@ -275,8 +327,6 @@ int main (int argc, char *argv[])
 		     << _("under certain conditions; see the source for copying conditions.")
 		     << endl;
 	}
-
-	/* some GUI objects need this */
 
 	if (!ARDOUR::init (ARDOUR_COMMAND_LINE::use_vst, ARDOUR_COMMAND_LINE::try_hw_optimization, localedir)) {
 		error << string_compose (_("could not initialize %1."), PROGRAM_NAME) << endmsg;
@@ -308,32 +358,7 @@ int main (int argc, char *argv[])
 	ARDOUR::cleanup ();
 	pthread_cancel_all ();
 
-#if (!defined COMPILER_MSVC && defined PLATFORM_WINDOWS)
-	if (pStdOut) {
-		fclose (pStdOut);
-	}
-	if (pStdErr) {
-		fclose (pStdErr);
-	}
-
-	if (bConsole) {
-		// Detach and free the console from our application
-		INPUT_RECORD input_record;
-
-		input_record.EventType = KEY_EVENT;
-		input_record.Event.KeyEvent.bKeyDown = TRUE;
-		input_record.Event.KeyEvent.dwControlKeyState = 0;
-		input_record.Event.KeyEvent.uChar.UnicodeChar = VK_RETURN;
-		input_record.Event.KeyEvent.wRepeatCount      = 1;
-		input_record.Event.KeyEvent.wVirtualKeyCode   = VK_RETURN;
-		input_record.Event.KeyEvent.wVirtualScanCode  = MapVirtualKey( VK_RETURN, 0 );
-
-		DWORD written = 0;
-		WriteConsoleInput( GetStdHandle( STD_INPUT_HANDLE ), &input_record, 1, &written );
-
-		FreeConsole();
-	}
-#endif
+	console_madness_end ();
 
 	return 0;
 }

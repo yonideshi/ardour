@@ -316,9 +316,14 @@ MixerStrip::init ()
 
 	input_button.signal_button_press_event().connect (sigc::mem_fun(*this, &MixerStrip::input_press), false);
 	input_button.signal_button_release_event().connect (sigc::mem_fun(*this, &MixerStrip::input_release), false);
+	input_button.signal_size_allocate().connect (sigc::mem_fun (*this, &MixerStrip::input_button_resized));
+
+	input_button.set_text_ellipsize (Pango::ELLIPSIZE_MIDDLE);
+	output_button.set_text_ellipsize (Pango::ELLIPSIZE_MIDDLE);
 
 	output_button.signal_button_press_event().connect (sigc::mem_fun(*this, &MixerStrip::output_press), false);
 	output_button.signal_button_release_event().connect (sigc::mem_fun(*this, &MixerStrip::output_release), false);
+	output_button.signal_size_allocate().connect (sigc::mem_fun (*this, &MixerStrip::output_button_resized));
 
 	number_label.signal_button_press_event().connect (sigc::mem_fun(*this, &MixerStrip::number_button_button_press), false);
 
@@ -817,7 +822,7 @@ MixerStrip::output_press (GdkEventButton *ev)
 		RouteList copy = *routes;
 		copy.sort (RouteCompareByName ());
 		for (ARDOUR::RouteList::const_iterator i = copy.begin(); i != copy.end(); ++i) {
-			maybe_add_bundle_to_output_menu ((*i)->input()->bundle(), current);
+			maybe_add_bundle_to_output_menu ((*i)->output()->bundle(), current);
 		}
 
 		if (citems.size() == n_with_separator) {
@@ -837,7 +842,7 @@ MixerStrip::output_press (GdkEventButton *ev)
 		}
 		
 		citems.push_back (SeparatorElem());
-		citems.push_back (MenuElem (_("Connection Grid"), sigc::mem_fun (*(static_cast<RouteUI*>(this)), &RouteUI::edit_output_configuration)));
+		citems.push_back (MenuElem (_("Routing Grid"), sigc::mem_fun (*(static_cast<RouteUI*>(this)), &RouteUI::edit_output_configuration)));
 
 		output_menu.popup (1, ev->time);
 		break;
@@ -939,7 +944,7 @@ MixerStrip::input_press (GdkEventButton *ev)
 		}
 
 		citems.push_back (SeparatorElem());
-		citems.push_back (MenuElem (_("Connection Grid"), sigc::mem_fun (*(static_cast<RouteUI*>(this)), &RouteUI::edit_input_configuration)));
+		citems.push_back (MenuElem (_("Routing Grid"), sigc::mem_fun (*(static_cast<RouteUI*>(this)), &RouteUI::edit_input_configuration)));
 
 		input_menu.popup (1, ev->time);
 
@@ -1148,7 +1153,6 @@ MixerStrip::update_io_button (boost::shared_ptr<ARDOUR::Route> route, Width widt
 	uint32_t other_connection_count = 0;
 
 	ostringstream label;
-	string label_string;
 
 	bool have_label = false;
 	bool each_io_has_one_connection = true;
@@ -1161,6 +1165,11 @@ MixerStrip::update_io_button (boost::shared_ptr<ARDOUR::Route> route, Width widt
 
 	ostringstream tooltip;
 	char * tooltip_cstr;
+	
+	//to avoid confusion, the button caption should only show connections that match the datatype of the track
+	DataType dt = DataType::AUDIO;
+	if ( boost::dynamic_pointer_cast<MidiTrack>(route) != 0 )
+		dt = DataType::MIDI;
 
 	if (for_input) {
 		io_count = route->n_inputs().n_total();
@@ -1177,6 +1186,10 @@ MixerStrip::update_io_button (boost::shared_ptr<ARDOUR::Route> route, Width widt
 		} else {
 			port = route->output()->nth (io_index);
 		}
+		
+		//ignore any port connections that don't match our DataType
+		if (port->type() != dt)
+			continue;  
 
 		port_connections.clear ();
 		port->get_connections(port_connections);
@@ -1184,12 +1197,20 @@ MixerStrip::update_io_button (boost::shared_ptr<ARDOUR::Route> route, Width widt
 
 		if (!port_connections.empty()) {
 			for (vector<string>::iterator i = port_connections.begin(); i != port_connections.end(); ++i) {
+				string pn = "";
 				string& connection_name (*i);
 
+				if (connection_name.find("system:") == 0) {
+					pn = AudioEngine::instance()->get_pretty_name_by_name (connection_name);
+				}
+
 				if (io_connection_count == 0) {
-					tooltip << endl << Glib::Markup::escape_text(port->name().substr(port->name().find("/") + 1)) << " -> " << Glib::Markup::escape_text(connection_name);
+					tooltip << endl << Glib::Markup::escape_text(port->name().substr(port->name().find("/") + 1))
+						<< " -> "
+						<< Glib::Markup::escape_text( pn.empty() ? connection_name : pn );
 				} else {
-					tooltip << ", " << Glib::Markup::escape_text(connection_name);
+					tooltip << ", "
+						<< Glib::Markup::escape_text( pn.empty() ? connection_name : pn );
 				}
 
 				if (connection_name.find("ardour:") == 0) {
@@ -1204,6 +1225,32 @@ MixerStrip::update_io_button (boost::shared_ptr<ARDOUR::Route> route, Width widt
 					if (connection_name.find(ardour_track_name) == 0) {
 						++ardour_connection_count;
 					}
+				} else if (!pn.empty()) {
+					if (system_ports.empty()) {
+						system_ports += pn;
+					} else {
+						system_ports += "/" + pn;
+					}
+					if (connection_name.find("system:") == 0) {
+						++system_connection_count;
+					}
+				} else if (connection_name.find("system:midi_") == 0) {
+					if (for_input) {
+						// "system:midi_capture_123" -> "123"
+						system_port = "M " + connection_name.substr(20);
+					} else {
+						// "system:midi_playback_123" -> "123"
+						system_port = "M " + connection_name.substr(21);
+					}
+
+					if (system_ports.empty()) {
+						system_ports += system_port;
+					} else {
+						system_ports += "/" + system_port;
+					}
+
+					++system_connection_count;
+
 				} else if (connection_name.find("system:") == 0) {
 					if (for_input) {
 						// "system:capture_123" -> "123"
@@ -1287,19 +1334,10 @@ MixerStrip::update_io_button (boost::shared_ptr<ARDOUR::Route> route, Width widt
 		}
 	}
 
-	switch (width) {
-	case Wide:
-		label_string = label.str().substr(0, 7);
-		break;
-	case Narrow:
-		label_string = label.str().substr(0, 3);
-		break;
-  	}
-
 	if (for_input) {
-		input_button.set_text (label_string);
+		input_button.set_text (label.str());
 	} else {
-		output_button.set_text (label_string);
+		output_button.set_text (label.str());
 	}
 }
 
@@ -1617,9 +1655,21 @@ MixerStrip::name_changed ()
 }
 
 void
+MixerStrip::input_button_resized (Gtk::Allocation& alloc)
+{
+	input_button.set_layout_ellipsize_width (alloc.get_width() * PANGO_SCALE);
+}
+
+void
+MixerStrip::output_button_resized (Gtk::Allocation& alloc)
+{
+	output_button.set_layout_ellipsize_width (alloc.get_width() * PANGO_SCALE);
+}
+
+void
 MixerStrip::name_button_resized (Gtk::Allocation& alloc)
 {
-	name_button.set_layout_ellisize_width (alloc.get_width() * PANGO_SCALE);
+	name_button.set_layout_ellipsize_width (alloc.get_width() * PANGO_SCALE);
 }
 
 bool

@@ -89,7 +89,7 @@ class AlsaPort {
 
 		virtual void* get_buffer (pframes_t nframes) = 0;
 
-		const LatencyRange& latency_range (bool for_playback) const
+		const LatencyRange latency_range (bool for_playback) const
 		{
 			return for_playback ? _playback_latency_range : _capture_latency_range;
 		}
@@ -304,6 +304,8 @@ class AlsaAudioBackend : public AudioBackend {
 		bool  _freewheel;
 		bool  _freewheeling;
 		bool  _measure_latency;
+
+		uint64_t _last_process_start;
 
 		static std::vector<std::string> _midi_options;
 		static std::vector<AudioBackend::DeviceStatus> _audio_device_status;

@@ -23,6 +23,10 @@
 
 #include <glibmm.h>
 
+#ifdef PLATFORM_WINDOWS
+#include <windows.h>
+#endif
+
 #include "dummy_audiobackend.h"
 #include "dummy_midi_seq.h"
 
@@ -112,6 +116,8 @@ DummyAudioBackend::enumerate_devices () const
 		_device_status.push_back (DeviceStatus (_("Pink Noise (low CPU)"), true));
 		_device_status.push_back (DeviceStatus (_("Sine Sweep"), true));
 		_device_status.push_back (DeviceStatus (_("Sine Sweep Swell"), true));
+		_device_status.push_back (DeviceStatus (_("Square Sweep"), true));
+		_device_status.push_back (DeviceStatus (_("Square Sweep Swell"), true));
 		_device_status.push_back (DeviceStatus (_("Loopback"), true));
 	}
 	return _device_status;
@@ -204,10 +210,8 @@ DummyAudioBackend::set_buffer_size (uint32_t bs)
 	 * with 'Loopback' there is exactly once cycle latency,
 	 * divide it between In + Out;
 	 */
-	const size_t l_in = _samples_per_period * .25;
-	const size_t l_out = _samples_per_period - l_in;
 	LatencyRange lr;
-	lr.min = lr.max = l_in + _systemic_input_latency;
+	lr.min = lr.max = _systemic_input_latency;
 	for (std::vector<DummyAudioPort*>::const_iterator it = _system_inputs.begin (); it != _system_inputs.end (); ++it) {
 		set_latency_range (*it, false, lr);
 	}
@@ -215,7 +219,7 @@ DummyAudioBackend::set_buffer_size (uint32_t bs)
 		set_latency_range (*it, false, lr);
 	}
 
-	lr.min = lr.max = l_out + _systemic_output_latency;
+	lr.min = lr.max = _systemic_output_latency;
 	for (std::vector<DummyAudioPort*>::const_iterator it = _system_outputs.begin (); it != _system_outputs.end (); ++it) {
 		set_latency_range (*it, true, lr);
 	}
@@ -317,13 +321,13 @@ std::vector<std::string>
 DummyAudioBackend::enumerate_midi_options () const
 {
 	if (_midi_options.empty()) {
-		_midi_options.push_back (_("No MIDI I/O"));
 		_midi_options.push_back (_("1 in, 1 out, Silence"));
 		_midi_options.push_back (_("2 in, 2 out, Silence"));
 		_midi_options.push_back (_("8 in, 8 out, Silence"));
 		_midi_options.push_back (_("Midi Event Generators"));
 		_midi_options.push_back (_("8 in, 8 out, Loopback"));
 		_midi_options.push_back (_("MIDI to Audio, Loopback"));
+		_midi_options.push_back (_("No MIDI I/O"));
 	}
 	return _midi_options;
 }
@@ -744,6 +748,10 @@ DummyAudioBackend::register_system_ports()
 		gt = DummyAudioPort::SineSweep;
 	} else if (_device == _("Sine Sweep Swell")) {
 		gt = DummyAudioPort::SineSweepSwell;
+	} else if (_device == _("Square Sweep")) {
+		gt = DummyAudioPort::SquareSweep;
+	} else if (_device == _("Square Sweep Swell")) {
+		gt = DummyAudioPort::SquareSweepSwell;
 	} else if (_device == _("Loopback")) {
 		gt = DummyAudioPort::Loopback;
 	} else {
@@ -759,12 +767,9 @@ DummyAudioBackend::register_system_ports()
 	const int m_ins = _n_midi_inputs == UINT_MAX ? 0 : _n_midi_inputs;
 	const int m_out = _n_midi_outputs == UINT_MAX ? a_ins : _n_midi_outputs;
 
-	/* with 'Loopback' there is exactly once cycle latency, divide it between In + Out; */
-	const size_t l_in = _samples_per_period * .25;
-	const size_t l_out = _samples_per_period - l_in;
 
 	/* audio ports */
-	lr.min = lr.max = l_in + _systemic_input_latency;
+	lr.min = lr.max = _systemic_input_latency;
 	for (int i = 1; i <= a_ins; ++i) {
 		char tmp[64];
 		snprintf(tmp, sizeof(tmp), "system:capture_%d", i);
@@ -775,7 +780,7 @@ DummyAudioBackend::register_system_ports()
 		static_cast<DummyAudioPort*>(p)->setup_generator (gt, _samplerate);
 	}
 
-	lr.min = lr.max = l_out + _systemic_output_latency;
+	lr.min = lr.max = _systemic_output_latency;
 	for (int i = 1; i <= a_out; ++i) {
 		char tmp[64];
 		snprintf(tmp, sizeof(tmp), "system:playback_%d", i);
@@ -786,7 +791,7 @@ DummyAudioBackend::register_system_ports()
 	}
 
 	/* midi ports */
-	lr.min = lr.max = l_in + _systemic_input_latency;
+	lr.min = lr.max = _systemic_input_latency;
 	for (int i = 0; i < m_ins; ++i) {
 		char tmp[64];
 		snprintf(tmp, sizeof(tmp), "system:midi_capture_%d", i+1);
@@ -799,7 +804,7 @@ DummyAudioBackend::register_system_ports()
 		}
 	}
 
-	lr.min = lr.max = l_out + _systemic_output_latency;
+	lr.min = lr.max = _systemic_output_latency;
 	for (int i = 1; i <= m_out; ++i) {
 		char tmp[64];
 		snprintf(tmp, sizeof(tmp), "system:midi_playback_%d", i);
@@ -814,17 +819,17 @@ DummyAudioBackend::register_system_ports()
 void
 DummyAudioBackend::unregister_ports (bool system_only)
 {
-	size_t i = 0;
 	_system_inputs.clear();
 	_system_outputs.clear();
 	_system_midi_in.clear();
 	_system_midi_out.clear();
-	while (i <  _ports.size ()) {
-		DummyPort* port = _ports[i];
+
+	for (std::vector<DummyPort*>::iterator i = _ports.begin (); i != _ports.end ();) {
+		DummyPort* port = *i;
 		if (! system_only || (port->is_physical () && port->is_terminal ())) {
 			port->disconnect_all ();
 			delete port;
-			_ports.erase (_ports.begin() + i);
+			i = _ports.erase (i);
 		} else {
 			++i;
 		}
@@ -980,8 +985,8 @@ DummyAudioBackend::midi_event_put (
 	assert (buffer && port_buffer);
 	DummyMidiBuffer& dst = * static_cast<DummyMidiBuffer*>(port_buffer);
 	if (dst.size () && (pframes_t)dst.back ()->timestamp () > timestamp) {
+		// nevermind, ::get_buffer() sorts events, but always print warning
 		fprintf (stderr, "DummyMidiBuffer: it's too late for this event.\n");
-		return -1;
 	}
 	dst.push_back (boost::shared_ptr<DummyMidiEvent>(new DummyMidiEvent (timestamp, buffer, size)));
 	return 0;
@@ -1043,14 +1048,32 @@ DummyAudioBackend::set_latency_range (PortEngine::PortHandle port, bool for_play
 LatencyRange
 DummyAudioBackend::get_latency_range (PortEngine::PortHandle port, bool for_playback)
 {
+	LatencyRange r;
 	if (!valid_port (port)) {
 		PBD::error << _("DummyPort::get_latency_range (): invalid port.") << endmsg;
-		LatencyRange r;
 		r.min = 0;
 		r.max = 0;
 		return r;
 	}
-	return static_cast<DummyPort*>(port)->latency_range (for_playback);
+	DummyPort *p =  static_cast<DummyPort*>(port);
+	assert(p);
+
+	r = p->latency_range (for_playback);
+	if (p->is_physical() && p->is_terminal()) {
+		if (p->is_input() && for_playback) {
+			const size_t l_in = _samples_per_period * .25;
+			r.min += l_in;
+			r.max += l_in;
+		}
+		if (p->is_output() && !for_playback) {
+			/* with 'Loopback' there is exactly once cycle latency, divide it between In + Out; */
+			const size_t l_in = _samples_per_period * .25;
+			const size_t l_out = _samples_per_period - l_in;
+			r.min += l_out;
+			r.max += l_out;
+		}
+	}
+	return r;
 }
 
 /* Discovering physical ports */
@@ -1563,6 +1586,8 @@ void DummyAudioPort::setup_generator (GeneratorType const g, float const sampler
 				_wavetable[i] = .12589f * sinf(2.0f * M_PI * (float)i / (float)_gen_period); // -18dBFS
 			}
 			break;
+		case SquareSweep:
+		case SquareSweepSwell:
 		case SineSweep:
 		case SineSweepSwell:
 			{
@@ -1579,8 +1604,9 @@ void DummyAudioPort::setup_generator (GeneratorType const g, float const sampler
 				const double b = log (f_max / f_min) / g_p2;
 				const double a = f_min / (b * samplerate);
 #endif
+				const uint32_t g_p2i = rint(g_p2);
 				_wavetable = (Sample*) malloc (_gen_period * sizeof(Sample));
-				for (uint32_t i = 0 ; i < g_p2; ++i) {
+				for (uint32_t i = 0 ; i < g_p2i; ++i) {
 #ifdef LINEAR_SWEEP
 					const double phase = i * (a + b * i);
 #else
@@ -1588,7 +1614,7 @@ void DummyAudioPort::setup_generator (GeneratorType const g, float const sampler
 #endif
 					_wavetable[i] = (float)sin (2. * M_PI * (phase - floor (phase)));
 				}
-				for (uint32_t i = g_p2; i < _gen_period; ++i) {
+				for (uint32_t i = g_p2i; i < _gen_period; ++i) {
 					const uint32_t j = _gen_period - i;
 #ifdef LINEAR_SWEEP
 					const double phase = j * (a + b * j);
@@ -1596,6 +1622,16 @@ void DummyAudioPort::setup_generator (GeneratorType const g, float const sampler
 					const double phase = a * exp (b * j) - a;
 #endif
 					_wavetable[i] = (float)sin (2. * M_PI * (phase - floor (phase)));
+				}
+				if (_gen_type == SquareSweep) {
+					for (uint32_t i = 0 ; i < _gen_period; ++i) {
+						_wavetable[i] = _wavetable[i] < 0 ? -.40709f : .40709f;
+					}
+				}
+				else if (_gen_type == SquareSweepSwell) {
+					for (uint32_t i = 0 ; i < _gen_period; ++i) {
+						_wavetable[i] = _wavetable[i] < 0 ? -1 : 1;
+					}
 				}
 			}
 			break;
@@ -1690,6 +1726,7 @@ void DummyAudioPort::generate (const pframes_t n_samples)
 			}
 			break;
 		case SineSweepSwell:
+		case SquareSweepSwell:
 			assert(_wavetable && _gen_period > 0);
 			{
 				const float vols = 2.f / (float)_gen_perio2;
@@ -1705,6 +1742,7 @@ void DummyAudioPort::generate (const pframes_t n_samples)
 			_gen_period = n_samples; // XXX DummyBackend::_samples_per_period;
 		case SineWave:
 		case SineSweep:
+		case SquareSweep:
 			assert(_wavetable && _gen_period > 0);
 			{
 				pframes_t written = 0;

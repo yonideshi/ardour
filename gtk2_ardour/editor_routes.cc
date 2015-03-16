@@ -636,7 +636,6 @@ void
 EditorRoutes::routes_added (list<RouteTimeAxisView*> routes)
 {
 	PBD::Unwinder<bool> at (_adding_routes, true);
-
 	bool from_scratch = (_model->children().size() == 0);
 	Gtk::TreeModel::Children::iterator insert_iter = _model->children().end();
 
@@ -647,10 +646,6 @@ EditorRoutes::routes_added (list<RouteTimeAxisView*> routes)
 			insert_iter = it;
 			break;
 		}
-	}
-
-	if(!from_scratch) {
-		_editor->selection->tracks.clear();
 	}
 
 	DisplaySuspender ds;
@@ -684,10 +679,6 @@ EditorRoutes::routes_added (list<RouteTimeAxisView*> routes)
 		row[_columns.solo_isolate_state] = (*x)->route()->solo_isolated();
 		row[_columns.solo_safe_state] = (*x)->route()->solo_safe();
 		row[_columns.name_editable] = true;
-
-		if (!from_scratch) {
-			_editor->selection->add(*x);
-		}
 
 		boost::weak_ptr<Route> wr ((*x)->route());
 
@@ -725,8 +716,9 @@ EditorRoutes::routes_added (list<RouteTimeAxisView*> routes)
 	_display.set_model (_model);
 
 	/* now update route order keys from the treeview/track display order */
-
-	sync_order_keys_from_treeview ();
+	if (!from_scratch) {
+		sync_order_keys_from_treeview ();
+	}
 }
 
 void
@@ -879,9 +871,18 @@ EditorRoutes::reset_remote_control_ids ()
 
 	for (ri = rows.begin(); ri != rows.end(); ++ri) {
 
+		/* skip two special values */
+		
+		if (rid == Route::MasterBusRemoteControlID) {
+			rid++;
+		}
+		
+		if (rid == Route::MonitorBusRemoteControlID) {
+			rid++;
+		}
+
 		boost::shared_ptr<Route> route = (*ri)[_columns.route];
 		bool visible = (*ri)[_columns.visible];
-
 
 		if (!route->is_master() && !route->is_monitor()) {
 

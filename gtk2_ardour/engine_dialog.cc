@@ -93,9 +93,10 @@ EngineControl::EngineControl ()
 	, ignore_changes (0)
 	, _desired_sample_rate (0)
 	, started_at_least_once (false)
+	, queue_device_changed (false)
 {
 	using namespace Notebook_Helpers;
-	vector<string> strings;
+	vector<string> backend_names;
 	Label* label;
 	AttachOptions xopt = AttachOptions (FILL|EXPAND);
 	int row;
@@ -113,11 +114,10 @@ EngineControl::EngineControl ()
 	}
 
 	for (vector<const ARDOUR::AudioBackendInfo*>::const_iterator b = backends.begin(); b != backends.end(); ++b) {
-		strings.push_back ((*b)->name);
+		backend_names.push_back ((*b)->name);
 	}
 
-	set_popdown_strings (backend_combo, strings);
-	backend_combo.set_active_text (strings.front());
+	set_popdown_strings (backend_combo, backend_names);
 	backend_combo.signal_changed().connect (sigc::mem_fun (*this, &EngineControl::backend_changed));
 
 	/* setup basic packing characteristics for the table used on the main
@@ -278,16 +278,30 @@ EngineControl::EngineControl ()
 	ARDOUR::AudioEngine::instance()->Running.connect (running_connection, MISSING_INVALIDATOR, boost::bind (&EngineControl::engine_running, this), gui_context());
 	ARDOUR::AudioEngine::instance()->Stopped.connect (stopped_connection, MISSING_INVALIDATOR, boost::bind (&EngineControl::engine_stopped, this), gui_context());
 	ARDOUR::AudioEngine::instance()->Halted.connect (stopped_connection, MISSING_INVALIDATOR, boost::bind (&EngineControl::engine_stopped, this), gui_context());
+	ARDOUR::AudioEngine::instance()->DeviceListChanged.connect (devicelist_connection, MISSING_INVALIDATOR, boost::bind (&EngineControl::device_list_changed, this), gui_context());
 
-	if (audio_setup)
-	{
+	if (audio_setup) {
 		set_state (*audio_setup);
 	}
+
+	if (backend_combo.get_active_text().empty()) {
+		backend_combo.set_active_text (backend_names.front());
+	}
+
 	{
 		/* ignore: don't save state */
 		PBD::Unwinder<uint32_t> protect_ignore_changes (ignore_changes, ignore_changes + 1);
 		backend_changed ();
 	}
+
+	/* in case the setting the backend failed, e.g. stale config, from set_state(), try again */
+	if (0 == ARDOUR::AudioEngine::instance()->current_backend()) {
+		backend_combo.set_active_text (backend_names.back());
+		/* ignore: don't save state */
+		PBD::Unwinder<uint32_t> protect_ignore_changes (ignore_changes, ignore_changes + 1);
+		backend_changed ();
+	}
+
 
 	/* Connect to signals */
 
@@ -708,6 +722,7 @@ EngineControl::backend_changed ()
 
 	if (!(backend = ARDOUR::AudioEngine::instance()->set_backend (backend_name, "ardour", ""))) {
 		/* eh? setting the backend failed... how ? */
+		/* A: stale config contains a backend that does not exist in current build */
 		return;
 	}
 
@@ -780,7 +795,6 @@ bool
 EngineControl::print_channel_count (Gtk::SpinButton* sb)
 {
 	if (ARDOUR::Profile->get_mixbus()) {
-		cout << "Mixbus crash trap. sb->get_value(): " << sb->get_value();
 		return true;
 	}
 	
@@ -825,15 +839,22 @@ EngineControl::list_devices ()
 		update_sensitivity ();
 
 		{
-			string current_device;
-			current_device = backend->device_name ();
+			string current_device, found_device;
+			current_device = device_combo.get_active_text ();
 			if (current_device == "") {
-				// device might not have been set yet
-				current_device = device_combo.get_active_text ();
-				if (current_device == "")
-					// device has never been set, make sure it's not blank
-					current_device = available_devices.front ();
+				current_device = backend->device_name ();
 			}
+
+			// Make sure that the active text is still relevant for this
+			// device (it might only be relevant to the previous device!!)
+			for (vector<string>::const_iterator i = available_devices.begin(); i != available_devices.end(); ++i) {
+				if (*i == current_device)
+					found_device = current_device;
+			}
+			if (found_device == "")
+				// device has never been set (or was not relevant
+				// for this backend) Let's make sure it's not blank
+				current_device = available_devices.front ();
 
 			PBD::Unwinder<uint32_t> protect_ignore_changes (ignore_changes, ignore_changes + 1);
 			set_popdown_strings (device_combo, available_devices);
@@ -898,6 +919,15 @@ EngineControl::device_changed ()
 	assert (backend);
 	string device_name = device_combo.get_active_text ();
 	vector<string> s;
+
+	if (device_name != backend->device_name()) {
+		/* we set the backend-device to query various device related intormation.
+		 * This has the side effect that backend->device_name() will match
+		 * the device_name and  'change_device' will never be true.
+		 * so work around this by setting...
+		 */
+		queue_device_changed = true;
+	}
 	
 	//the device name must be set FIRST so ASIO can populate buffersizes and the control panel button
 	backend->set_device_name(device_name);
@@ -983,7 +1013,7 @@ EngineControl::device_changed ()
 			if (0 == period) {
 				period = backend->default_buffer_size(device_name);
 			}
-			buffer_size_combo.set_active_text (bufsize_as_string (period));
+			set_active_text_if_present (buffer_size_combo, bufsize_as_string (period));
 			show_buffer_duration ();
 		} else {
 			buffer_size_combo.set_sensitive (false);
@@ -1217,7 +1247,7 @@ EngineControl::maybe_display_saved_state ()
 		if (!_desired_sample_rate) {
 			sample_rate_combo.set_active_text (rate_as_string (state->sample_rate));
 		}
-		buffer_size_combo.set_active_text (bufsize_as_string (state->buffer_size));
+		set_active_text_if_present (buffer_size_combo, bufsize_as_string (state->buffer_size));
 		/* call this explicitly because we're ignoring changes to
 		   the controls at this point.
 		 */
@@ -1435,7 +1465,7 @@ EngineControl::set_state (const XMLNode& root)
 			driver_combo.set_active_text ((*i)->driver);
 			device_combo.set_active_text ((*i)->device);
 			sample_rate_combo.set_active_text (rate_as_string ((*i)->sample_rate));
-			buffer_size_combo.set_active_text (bufsize_as_string ((*i)->buffer_size));
+			set_active_text_if_present (buffer_size_combo, bufsize_as_string ((*i)->buffer_size));
 			input_latency.set_value ((*i)->input_latency);
 			output_latency.set_value ((*i)->output_latency);
 			midi_option_combo.set_active_text ((*i)->midi_option);
@@ -1481,7 +1511,7 @@ EngineControl::push_state_to_backend (bool start)
 				}
 			}
 
-			if (get_device_name() != backend->device_name()) {
+			if (queue_device_changed || get_device_name() != backend->device_name()) {
 				change_device = true;
 			}
 
@@ -1549,6 +1579,8 @@ EngineControl::push_state_to_backend (bool start)
 			change_bufsize = true;
 		}
 	}
+
+	queue_device_changed = false;
 
 	if (!_have_control) {
 
@@ -1752,6 +1784,8 @@ EngineControl::get_buffer_size () const
 	uint32_t samples;
 
 	if (sscanf (txt.c_str(), "%d", &samples) != 1) {
+		fprintf(stderr, "Find a trout and repeatedly slap the nearest C++ who throws exceptions without catching them.\n");
+		fprintf(stderr, "Ardour will likely crash now, giving you time to get the trout.\n");
 		throw exception ();
 	}
 
@@ -2143,7 +2177,7 @@ EngineControl::engine_running ()
 	boost::shared_ptr<ARDOUR::AudioBackend> backend = ARDOUR::AudioEngine::instance()->current_backend();
 	assert (backend);
 
-	buffer_size_combo.set_active_text (bufsize_as_string (backend->buffer_size()));
+	set_active_text_if_present (buffer_size_combo, bufsize_as_string (backend->buffer_size()));
 	sample_rate_combo.set_active_text (rate_as_string (backend->sample_rate()));
 
 	buffer_size_combo.set_sensitive (true);
@@ -2169,6 +2203,14 @@ EngineControl::engine_stopped ()
 	sample_rate_combo.set_sensitive (true);
 	buffer_size_combo.set_sensitive (true);
 	engine_status.set_markup(string_compose ("<span foreground=\"red\">%1</span>", _("Inactive")));
+}
+
+void
+EngineControl::device_list_changed ()
+{
+	PBD::Unwinder<uint32_t> protect_ignore_changes (ignore_changes, ignore_changes + 1);
+	list_devices ();
+	midi_option_changed();
 }
 
 void

@@ -96,18 +96,17 @@ ARDOUR_UI::setup_windows ()
 	status_bar_event_box->add_events (Gdk::BUTTON_PRESS_MASK|Gdk::BUTTON_RELEASE_MASK);
 	status_bar_label.set_size_request (300, -1);
 	status_bar_packer->pack_start (*status_bar_event_box, true, true, 6);
-	status_bar_packer->pack_start (error_log_button, false, false);
+	status_bar_packer->pack_start (error_alert_button, false, false);
 
 	status_bar_label.show ();
 	status_bar_event_box->show ();
 	status_bar_packer->show ();
-	error_log_button.show ();
+	error_alert_button.show ();
 
-	error_log_button.signal_clicked().connect (mem_fun (*this, &UI::toggle_errors));
 	status_bar_event_box->signal_button_press_event().connect (mem_fun (*this, &ARDOUR_UI::status_bar_button_press));
 
 	editor->get_status_bar_packer().pack_start (*status_bar_packer, true, true);
-	editor->get_status_bar_packer().pack_start (menu_bar_base, false, false, 6);
+	editor->get_status_bar_packer().pack_start (menu_bar_base, false, false, 2);
 #else
 	top_packer.pack_start (menu_bar_base, false, false);
 #endif
@@ -146,6 +145,7 @@ ARDOUR_UI::setup_tooltips ()
 	set_tip (primary_clock, _("<b>Primary Clock</b> right-click to set display mode. Click to edit, click+drag a digit or mouse-over+scroll wheel to modify.\nText edits: right-to-left overwrite <tt>Esc</tt>: cancel; <tt>Enter</tt>: confirm; postfix the edit with '+' or '-' to enter delta times.\n"));
 	set_tip (secondary_clock, _("<b>Secondary Clock</b> right-click to set display mode. Click to edit, click+drag a digit or mouse-over+scroll wheel to modify.\nText edits: right-to-left overwrite <tt>Esc</tt>: cancel; <tt>Enter</tt>: confirm; postfix the edit with '+' or '-' to enter delta times.\n"));
 	set_tip (editor_meter_peak_display, _("Reset All Peak Indicators"));
+	set_tip (error_alert_button, _("Show Error Log and acknowledge warnings"));
 
 	synchronize_sync_source_and_video_pullup ();
 
@@ -175,18 +175,25 @@ ARDOUR_UI::display_message (const char *prefix, gint prefix_len, RefPtr<TextBuff
 	string text;
 
 	UI::display_message (prefix, prefix_len, ptag, mtag, msg);
-#ifdef TOP_MENUBAR
+
+	ArdourLogLevel ll = LogLevelNone;
 
 	if (strcmp (prefix, _("[ERROR]: ")) == 0) {
 		text = "<span color=\"red\" weight=\"bold\">";
+		ll = LogLevelError;
 	} else if (strcmp (prefix, _("[WARNING]: ")) == 0) {
 		text = "<span color=\"yellow\" weight=\"bold\">";
+		ll = LogLevelWarning;
 	} else if (strcmp (prefix, _("[INFO]: ")) == 0) {
 		text = "<span color=\"green\" weight=\"bold\">";
+		ll = LogLevelInfo;
 	} else {
 		text = "<span color=\"white\" weight=\"bold\">???";
 	}
 
+	_log_not_acknowledged = std::max(_log_not_acknowledged, ll);
+
+#ifdef TOP_MENUBAR
 	text += prefix;
 	text += "</span>";
 	text += msg;
@@ -325,6 +332,8 @@ ARDOUR_UI::setup_transport ()
 	auditioning_alert_button.signal_button_press_event().connect (sigc::mem_fun(*this,&ARDOUR_UI::audition_alert_press), false);
 	feedback_alert_button.set_name ("feedback alert");
 	feedback_alert_button.signal_button_press_event().connect (sigc::mem_fun (*this, &ARDOUR_UI::feedback_alert_press), false);
+	error_alert_button.set_name ("error alert");
+	error_alert_button.signal_button_press_event().connect (sigc::mem_fun(*this,&ARDOUR_UI::error_alert_press), false);
 
 	alert_box.set_homogeneous (true);
 	alert_box.set_spacing (2);
@@ -536,6 +545,15 @@ ARDOUR_UI::feedback_alert_press (GdkEventButton *)
 	return true;
 }
 
+bool
+ARDOUR_UI::error_alert_press (GdkEventButton*)
+{
+	_log_not_acknowledged = LogLevelNone;
+	error_blink (false); // immediate acknowledge
+	UI::show_errors();
+	return true;
+}
+
 void
 ARDOUR_UI::solo_blink (bool onoff)
 {
@@ -608,6 +626,37 @@ ARDOUR_UI::feedback_blink (bool onoff)
 		feedback_alert_button.set_active (false);
 	}
 }
+
+void
+ARDOUR_UI::error_blink (bool onoff)
+{
+	switch (_log_not_acknowledged) {
+		case LogLevelError:
+			// blink
+			if (onoff) {
+				error_alert_button.set_custom_led_color(0xff0000ff); // bright red
+				error_alert_button.set_active (true);
+			} else {
+				error_alert_button.set_custom_led_color(0x880000ff); // dark red
+				error_alert_button.set_active (false);
+			}
+			break;
+		case LogLevelWarning:
+			error_alert_button.set_custom_led_color(0xccaa00ff); // yellow
+			error_alert_button.set_active (true);
+			break;
+		case LogLevelInfo:
+			error_alert_button.set_custom_led_color(0x88cc00ff); // lime green
+			error_alert_button.set_active (true);
+			break;
+		default:
+			error_alert_button.set_custom_led_color(0x333333ff); // gray
+			error_alert_button.set_active (false);
+			break;
+	}
+}
+
+
 
 void
 ARDOUR_UI::set_transport_sensitivity (bool yn)

@@ -33,6 +33,7 @@
 #include "pbd/stateful_diff_command.h"
 
 #include "ardour/midi_model.h"
+#include "ardour/midi_playlist.h"
 #include "ardour/midi_region.h"
 #include "ardour/midi_source.h"
 #include "ardour/midi_track.h"
@@ -390,7 +391,6 @@ MidiRegionView::canvas_group_event(GdkEvent* ev)
 
 	case GDK_BUTTON_RELEASE:
 		r = button_release (&ev->button);
-		_note_player.reset();
 		return r;
 
 	case GDK_MOTION_NOTIFY:
@@ -1066,6 +1066,9 @@ MidiRegionView::apply_diff (bool as_subcommand)
 		}
 	}
 
+	midi_view()->midi_track()->midi_playlist()->region_edited(
+		_region, _note_diff_command);
+
 	if (as_subcommand) {
 		_model->apply_command_as_subcommand (*trackview.session(), _note_diff_command);
 	} else {
@@ -1074,7 +1077,6 @@ MidiRegionView::apply_diff (bool as_subcommand)
 	}
 
 	_note_diff_command = 0;
-	midi_view()->midi_track()->playlist_modified();
 
 	if (add_or_remove) {
 		_marked_for_selection.clear();
@@ -1644,13 +1646,13 @@ MidiRegionView::start_playing_midi_chord (vector<boost::shared_ptr<NoteType> > n
 		return;
 	}
 
-	_note_player = boost::shared_ptr<NotePlayer>(new NotePlayer(route_ui->midi_track()));
+	NotePlayer* player = new NotePlayer (route_ui->midi_track());
 
 	for (vector<boost::shared_ptr<NoteType> >::iterator n = notes.begin(); n != notes.end(); ++n) {
-		_note_player->add (*n);
+		player->add (*n);
 	}
 
-	_note_player->on ();
+	player->play ();
 }
 
 
@@ -1662,7 +1664,7 @@ MidiRegionView::note_in_region_range (const boost::shared_ptr<NoteType> note, bo
 	const framecnt_t tick_frames       = Evoral::Beats::tick().to_ticks(trackview.session()->frame_rate());
 	const framepos_t note_start_frames = source_beats_to_region_frames (note->time());
 	const bool       outside           = ((note_start_frames <= -tick_frames) ||
-	                                      (note_start_frames > _region->last_frame()));
+	                                      (note_start_frames >= _region->length()));
 
 	visible = (note->note() >= midi_stream_view()->lowest_note()) &&
 		(note->note() <= midi_stream_view()->highest_note());
@@ -4023,12 +4025,6 @@ MidiRegionView::selection_cleared (MidiRegionView* rv)
 
 	/* Clear our selection in sympathy; but don't signal the fact */
 	clear_selection (false);
-}
-
-void
-MidiRegionView::note_button_release ()
-{
-	_note_player.reset();
 }
 
 ChannelMode

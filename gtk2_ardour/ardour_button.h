@@ -65,6 +65,8 @@ class ArdourButton : public CairoWidget , public Gtkmm2ext::Activatable
 	void set_active_state (Gtkmm2ext::ActiveState);
 	void set_visual_state (Gtkmm2ext::VisualState);
 
+	void set_custom_led_color (uint32_t c, bool useit = true) { led_custom_color = c; use_custom_led_color = useit; }
+
 	void set_act_on_release (bool onRelease) { _act_on_release = onRelease; }
 
 	Element elements() const { return _elements; }
@@ -82,7 +84,7 @@ class ArdourButton : public CairoWidget , public Gtkmm2ext::Activatable
 	void set_led_left (bool yn);
 	void set_distinct_led_click (bool yn);
 
-	void set_layout_ellisize_width (int w);
+	void set_layout_ellipsize_width (int w);
 	void set_layout_font (const Pango::FontDescription&);
 	void set_text_ellipsize (Pango::EllipsizeMode);
 	
@@ -154,6 +156,8 @@ class ArdourButton : public CairoWidget , public Gtkmm2ext::Activatable
 
 	uint32_t led_active_color;
 	uint32_t led_inactive_color;
+	uint32_t led_custom_color;
+	bool     use_custom_led_color;
 
 	cairo_pattern_t* convex_pattern;
 	cairo_pattern_t* concave_pattern;

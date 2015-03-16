@@ -201,7 +201,7 @@ Mixer_UI::Mixer_UI ()
 #else
 	global_hpacker.pack_start (out_packer, false, false, 12);
 #endif
-	list_hpane.pack1(list_vpacker, true, true);
+	list_hpane.pack1(list_vpacker, false, false);
 	list_hpane.pack2(global_hpacker, true, false);
 
 	rhs_pane1.signal_size_allocate().connect (sigc::bind (sigc::mem_fun(*this, &Mixer_UI::pane_allocation_handler),
@@ -473,6 +473,17 @@ Mixer_UI::reset_remote_control_ids ()
 	uint32_t invisible_key = UINT32_MAX;
 
 	for (ri = rows.begin(); ri != rows.end(); ++ri) {
+
+		/* skip two special values */
+		
+		if (rid == Route::MasterBusRemoteControlID) {
+			rid++;
+		}
+		
+		if (rid == Route::MonitorBusRemoteControlID) {
+			rid++;
+		}
+
 		boost::shared_ptr<Route> route = (*ri)[track_columns.route];
 		bool visible = (*ri)[track_columns.visible];
 

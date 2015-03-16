@@ -92,6 +92,7 @@
 #include "ardour/source_factory.h"
 #include "ardour/speakers.h"
 #include "ardour/track.h"
+#include "ardour/user_bundle.h"
 #include "ardour/utils.h"
 
 #include "midi++/port.h"
@@ -265,7 +266,7 @@ Session::Session (AudioEngine &eng,
 	, _step_editors (0)
 	, _suspend_timecode_transmission (0)
 	,  _speakers (new Speakers)
-	, _order_hint (0)
+	, _order_hint (-1)
 	, ignore_route_processor_changes (false)
 	, _scene_changer (0)
 	, _midi_ports (0)
@@ -441,6 +442,10 @@ Session::immediately_post_engine ()
 	catch (failed_constructor& err) {
 		return -1;
 	}
+
+	/* TODO, connect in different thread. (PortRegisteredOrUnregistered may be in RT context)
+	 * can we do that? */
+	 _engine.PortRegisteredOrUnregistered.connect_same_thread (*this, boost::bind (&Session::setup_bundles, this));
 
 	return 0;
 }
@@ -685,6 +690,19 @@ Session::setup_click_state (const XMLNode* node)
 void
 Session::setup_bundles ()
 {
+
+	{
+		RCUWriter<BundleList> writer (_bundles);
+		boost::shared_ptr<BundleList> b = writer.get_copy ();
+		for (BundleList::iterator i = b->begin(); i != b->end();) {
+			if (boost::dynamic_pointer_cast<UserBundle>(*i)) {
+				++i;
+				continue;
+			}
+			i = b->erase(i);
+		}
+	}
+
 	vector<string> inputs[DataType::num_types];
 	vector<string> outputs[DataType::num_types];
 	for (uint32_t i = 0; i < DataType::num_types; ++i) {
@@ -704,13 +722,18 @@ Session::setup_bundles ()
 
 	for (uint32_t np = 0; np < outputs[DataType::AUDIO].size(); ++np) {
 		char buf[32];
-		snprintf (buf, sizeof (buf), _("out %" PRIu32), np+1);
+		std::string pn = _engine.get_pretty_name_by_name (outputs[DataType::AUDIO][np]);
+		if (!pn.empty()) {
+			snprintf (buf, sizeof (buf), _("out %s"), pn.substr(0,12).c_str());
+		} else {
+			snprintf (buf, sizeof (buf), _("out %" PRIu32), np+1);
+		}
 
 		boost::shared_ptr<Bundle> c (new Bundle (buf, true));
 		c->add_channel (_("mono"), DataType::AUDIO);
 		c->set_port (0, outputs[DataType::AUDIO][np]);
 
-		add_bundle (c);
+		add_bundle (c, false);
 	}
 
 	/* stereo output bundles */
@@ -725,7 +748,7 @@ Session::setup_bundles ()
 			c->add_channel (_("R"), DataType::AUDIO);
 			c->set_port (1, outputs[DataType::AUDIO][np + 1]);
 
-			add_bundle (c);
+			add_bundle (c, false);
 		}
 	}
 
@@ -733,13 +756,18 @@ Session::setup_bundles ()
 
 	for (uint32_t np = 0; np < inputs[DataType::AUDIO].size(); ++np) {
 		char buf[32];
-		snprintf (buf, sizeof (buf), _("in %" PRIu32), np+1);
+		std::string pn = _engine.get_pretty_name_by_name (inputs[DataType::AUDIO][np]);
+		if (!pn.empty()) {
+			snprintf (buf, sizeof (buf), _("in %s"), pn.substr(0,12).c_str());
+		} else {
+			snprintf (buf, sizeof (buf), _("in %" PRIu32), np+1);
+		}
 
 		boost::shared_ptr<Bundle> c (new Bundle (buf, false));
 		c->add_channel (_("mono"), DataType::AUDIO);
 		c->set_port (0, inputs[DataType::AUDIO][np]);
 
-		add_bundle (c);
+		add_bundle (c, false);
 	}
 
 	/* stereo input bundles */
@@ -755,7 +783,7 @@ Session::setup_bundles ()
 			c->add_channel (_("R"), DataType::AUDIO);
 			c->set_port (1, inputs[DataType::AUDIO][np + 1]);
 
-			add_bundle (c);
+			add_bundle (c, false);
 		}
 	}
 
@@ -763,26 +791,36 @@ Session::setup_bundles ()
 
 	for (uint32_t np = 0; np < inputs[DataType::MIDI].size(); ++np) {
 		string n = inputs[DataType::MIDI][np];
-		boost::erase_first (n, X_("alsa_pcm:"));
-
+		std::string pn = _engine.get_pretty_name_by_name (n);
+		if (!pn.empty()) {
+			n = pn;
+		} else {
+			boost::erase_first (n, X_("alsa_pcm:"));
+		}
 		boost::shared_ptr<Bundle> c (new Bundle (n, false));
 		c->add_channel ("", DataType::MIDI);
 		c->set_port (0, inputs[DataType::MIDI][np]);
-		add_bundle (c);
+		add_bundle (c, false);
 	}
 
 	/* MIDI output bundles */
 
 	for (uint32_t np = 0; np < outputs[DataType::MIDI].size(); ++np) {
 		string n = outputs[DataType::MIDI][np];
-		boost::erase_first (n, X_("alsa_pcm:"));
-
+		std::string pn = _engine.get_pretty_name_by_name (n);
+		if (!pn.empty()) {
+			n = pn;
+		} else {
+			boost::erase_first (n, X_("alsa_pcm:"));
+		}
 		boost::shared_ptr<Bundle> c (new Bundle (n, true));
 		c->add_channel ("", DataType::MIDI);
 		c->set_port (0, outputs[DataType::MIDI][np]);
-		add_bundle (c);
+		add_bundle (c, false);
 	}
 
+	// we trust the backend to only calls us if there's a change
+	BundleAddedOrRemoved (); /* EMIT SIGNAL */
 }
 
 void
@@ -2516,9 +2554,9 @@ Session::add_routes_inner (RouteList& new_routes, bool input_auto_connect, bool 
         ChanCount existing_outputs;
 	uint32_t order = next_control_id();
 
-	if (_order_hint != 0) {
+	if (_order_hint > -1) {
 		order = _order_hint;
-		_order_hint = 0;
+		_order_hint = -1;
 	}
 
         count_existing_track_channels (existing_inputs, existing_outputs);
@@ -4098,7 +4136,7 @@ Session::available_capture_duration ()
 }
 
 void
-Session::add_bundle (boost::shared_ptr<Bundle> bundle)
+Session::add_bundle (boost::shared_ptr<Bundle> bundle, bool emit_signal)
 {
 	{
 		RCUWriter<BundleList> writer (_bundles);
@@ -4106,7 +4144,9 @@ Session::add_bundle (boost::shared_ptr<Bundle> bundle)
 		b->push_back (bundle);
 	}
 
-	BundleAdded (bundle); /* EMIT SIGNAL */
+	if (emit_signal) {
+		BundleAddedOrRemoved (); /* EMIT SIGNAL */
+	}
 
 	set_dirty();
 }
@@ -4128,7 +4168,7 @@ Session::remove_bundle (boost::shared_ptr<Bundle> bundle)
 	}
 
 	if (removed) {
-		 BundleRemoved (bundle); /* EMIT SIGNAL */
+		 BundleAddedOrRemoved (); /* EMIT SIGNAL */
 	}
 
 	set_dirty();
