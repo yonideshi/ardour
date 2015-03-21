@@ -271,6 +271,38 @@ WaveView::y_extent (double s, bool /*round_to_lower_edge*/) const
 	}
 }
 
+void
+WaveView::draw_absent_image (Cairo::RefPtr<Cairo::ImageSurface>& image, PeakData* _peaks, int n_peaks) const
+{
+	Cairo::RefPtr<Cairo::ImageSurface> stripe = Cairo::ImageSurface::create (Cairo::FORMAT_A8, n_peaks, _height);
+
+	Cairo::RefPtr<Cairo::Context> stripe_context = Cairo::Context::create (stripe);
+	stripe_context->set_antialias (Cairo::ANTIALIAS_NONE);
+
+	uint32_t stripe_separation = 150;
+	double start = - floor (_height / stripe_separation) * stripe_separation;
+	int stripe_x = 0;
+
+	while (start < n_peaks) {
+
+		stripe_context->move_to (start, 0);
+		stripe_x = start + _height;
+		stripe_context->line_to (stripe_x, _height);
+		start += stripe_separation;
+	}
+
+	stripe_context->set_source_rgba (1.0, 1.0, 1.0, 1.0);
+	stripe_context->set_line_cap (Cairo::LINE_CAP_SQUARE);
+	stripe_context->set_line_width(50);
+	stripe_context->stroke();
+
+	Cairo::RefPtr<Cairo::Context> context = Cairo::Context::create (image);
+
+	context->set_source_rgba (1.0, 1.0, 0.0, 0.3);
+	context->mask (stripe, 0, 0);
+	context->fill ();
+}
+
 struct LineTips {
 	double top;
 	double bot;
@@ -758,7 +790,6 @@ WaveView::get_image (framepos_t start, framepos_t end) const
 
 	return ret;
 }
-
 
 boost::shared_ptr<WaveViewCache::Entry>
 WaveView::get_image_from_cache (framepos_t start, framepos_t end) const

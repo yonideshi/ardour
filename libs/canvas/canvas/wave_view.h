@@ -351,6 +351,7 @@ public:
 	
         ArdourCanvas::Coord y_extent (double, bool) const;
         void draw_image (Cairo::RefPtr<Cairo::ImageSurface>&, ARDOUR::PeakData*, int n_peaks, boost::shared_ptr<WaveViewThreadRequest>) const;
+	void draw_image (Cairo::RefPtr<Cairo::ImageSurface>&, ARDOUR::PeakData*, int) const;
 
         void cancel_my_render_request () const;
 
@@ -376,7 +377,6 @@ public:
         static Glib::Threads::Thread* _drawing_thread;
         typedef std::set<WaveView const *> DrawingRequestQueue;
         static DrawingRequestQueue request_queue;
-
 };
 
 }
