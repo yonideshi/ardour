@@ -331,7 +331,6 @@ public:
 	*/
 	mutable bool get_image_in_thread;
 
-	
         PBD::ScopedConnectionList invalidation_connection;
         PBD::ScopedConnection     image_ready_connection;
 

@@ -56,6 +56,7 @@ bool WaveView::_global_logscaled = false;
 WaveView::Shape WaveView::_global_shape = WaveView::Normal;
 bool WaveView::_global_show_waveform_clipping = true;
 double WaveView::_clip_level = 0.98853;
+WaveViewThreadClient WaveView::global_request_object;
 
 WaveViewCache* WaveView::images = 0;
 gint WaveView::drawing_thread_should_quit = 0;
@@ -66,6 +67,12 @@ WaveView::DrawingRequestQueue WaveView::request_queue;
 
 PBD::Signal0<void> WaveView::VisualPropertiesChanged;
 PBD::Signal0<void> WaveView::ClipLevelChanged;
+
+Glib::Threads::Thread* WaveView::_drawing_thread = 0;
+gint WaveView::drawing_thread_should_quit = 0;
+WaveView::DrawingRequestQueue WaveView::request_queue;
+Glib::Threads::Mutex WaveView::request_queue_lock;
+Glib::Threads::Cond WaveView::request_cond;
 
 WaveView::WaveView (Canvas* c, boost::shared_ptr<ARDOUR::AudioRegion> region)
 	: Item (c)
@@ -143,6 +150,13 @@ WaveView::debug_name() const
 void
 WaveView::image_ready ()
 {
+	redraw ();
+}
+
+void
+WaveView::image_ready ()
+{
+	cerr << "new image ready for " << _region->name() << endl;
 	redraw ();
 }
 
@@ -244,6 +258,134 @@ WaveView::invalidate_source (boost::weak_ptr<AudioSource> src)
 {
 	cancel_my_render_request ();
 	_current_image.reset ();
+}
+
+void
+WaveView::invalidate_image_cache ()
+{
+	ImageCache::iterator x;
+
+	cancel_my_render_request ();
+	image.clear ();
+	image_offset = 0;
+
+	Glib::Threads::Mutex::Lock lm (cache_lock);
+
+	/* XXX DO WE REALLY WANT TO CLEAR THE CACHE OF IMAGES? OTHER
+	 * REGIONS/WAVEVIEWS MAY BE USING THEM AND MAY CONTINUE TO USE THEM
+	 */
+	
+	if ((x = _image_cache.find (_region->audio_source (_channel))) == _image_cache.end ()) {
+		return;
+	}
+
+	vector <CacheEntry>& caches = _image_cache.find (_region->audio_source (_channel))->second;
+
+	for (vector<CacheEntry>::iterator c = caches.begin(); c != caches.end(); ) {
+
+		if (_channel == c->channel
+		    && _height == c->height
+		    && _region_amplitude == c->amplitude
+		    && _fill_color == c->fill_color) {
+
+			/* cached image matches current settings: get rid of it */
+			
+			c->image.clear (); // XXX is this really necessary?
+			c = caches.erase (c);
+			
+		} else {
+			++c;
+		}
+	}
+
+	if (caches.size () == 0) {
+		_image_cache.erase(_region->audio_source (_channel));
+	}
+}
+
+void
+WaveView::consolidate_image_cache () const
+{
+	list <uint32_t> deletion_list;
+	uint32_t other_entries = 0;
+	ImageCache::iterator x;
+
+	/* CALLER MUST HOLD CACHE LOCK */
+	
+	if ((x = _image_cache.find (_region->audio_source (_channel))) == _image_cache.end ()) {
+		return;
+	}
+
+	vector<CacheEntry>& caches  = x->second;
+
+	for (vector<CacheEntry>::iterator c1 = caches.begin(); c1 != caches.end(); ) {
+
+		vector<CacheEntry>::iterator nxt = c1;
+		++nxt;
+		
+		if (_channel != c1->channel
+		    || _height != c1->height
+		    || _region_amplitude != c1->amplitude
+		    || _fill_color != c1->fill_color) {
+
+			/* doesn't match current properties, ignore and move on
+			 * to the next one.
+			 */
+			
+			other_entries++;
+			c1 = nxt;
+			continue;
+		}
+
+		/* c1 now points to a cached image entry that matches current
+		 * properties. Check all subsequent cached imaged entries to
+		 * see if there are others that also match but represent
+		 * subsets of the range covered by this one.
+		 */
+
+		for (vector<CacheEntry>::iterator c2 = c1; c2 != caches.end(); ) {
+
+			vector<CacheEntry>::iterator nxt2 = c2;
+			++nxt2;
+		
+			if (c1 == c2 || _channel != c2->channel
+			    || _height != c2->height
+			    || _region_amplitude != c2->amplitude
+			    || _fill_color != c2->fill_color) {
+
+				/* properties do not match, ignore for the
+				 * purposes of consolidation.
+				 */
+				c2 = nxt2;
+				continue;
+			}
+			
+			if (c2->start >= c1->start && c2->end <= c1->end) {
+				/* c2 is fully contained by c1, so delete it */
+				c2 = caches.erase (c2);
+				continue;
+			}
+
+			c2 = nxt2;
+		}
+
+		c1 = nxt;
+	}
+
+	/* We don't care if this channel/height/amplitude/fill has anything in
+	   the cache - just drop the least-recently added entries (FIFO)
+	   until we reach a size where there is a maximum of CACHE_HIGH_WATER + other entries.
+	*/
+
+	while (caches.size() > CACHE_HIGH_WATER + other_entries) {
+		caches.front ().image.clear ();
+		caches.erase (caches.begin ());
+	}
+
+	if (caches.size () == 0) {
+		_image_cache.erase (_region->audio_source (_channel));
+	}
+>>>>>>> first mostly-sorta-kinda working of threaded waveview rendering
 }
 
 Coord
@@ -755,7 +897,6 @@ WaveView::get_image (framepos_t start, framepos_t end) const
 		}
 	}
 
-
 	if (!ret) {
 
 		/* no current image draw request, so look in the cache */
@@ -763,56 +904,65 @@ WaveView::get_image (framepos_t start, framepos_t end) const
 		ret = get_image_from_cache (start, end);
 
 	}
+
+	return false;
 }
-
-BaseUI::RequestType ArdourCanvas::WaveView::GetImage = BaseUI::new_request_type();
-
-struct WaveViewThreadRequest : public PBD::EventLoop::BaseRequestObject
-{
-  public:
-	WaveViewThreadRequest  () : stop (0) {}
-	
-	bool should_stop () const { return (bool) g_atomic_int_get (&stop); }
-	void cancel() const { g_atomic_int_set (&stop, 1); }
-
-	framepos_t start;
-	framepos_t end;
-	double     width;
-	double     samples_per_pixel;
-	uint16_t   channel;
-	boost::weak_ptr<ARDOUR::Region> region;
-	
-  private:
-	gint stop; /* intended for atomic access */
-};
-
-
-WaveView::queue_get_image (Cairo::RefPtr<Cairo::ImageSurface>& image, framepos_t start, framepos_t end)
-{
-	WaveViewThreadRequest* req = get_request (GetImage);
-
-	req->the_slot = boost::bind (&WaveView::queue_draw, this);
-	req->start = start;
-	req->end = end;
-	req->width = _width;
-	req->samples_per_pixel = _samples_per_pixel;
-	req->region = _region;
-	req->channel = _channel;
-	req->height = _height;
-	req->fill = _fill_color;
-	req->region_amplitude = _region_amplitude;
-
-	send_request (&req);
-}
-
 
 void
-WaveView::thread_get_image (WaveViewThreadRequest& req)
+WaveView::get_image (Cairo::RefPtr<Cairo::ImageSurface>& img, framepos_t start, framepos_t end, double& offset) const
 {
-	boost::shared_ptr<ARDOUR::Region> region = req.region.lock ();
+	/* this is called from a ::render() call, when we need an image to
+	   draw with.
+	*/
 
-	if (!region) {
-		/* Region deleted, request is invalid */
+	{
+		Glib::Threads::Mutex::Lock lmq (request_queue_lock);
+		Glib::Threads::Mutex::Lock lmc (cache_lock);
+
+		/* if there's a draw request outstanding, check to see if we
+		 * have an image there. if so, use it (and put it in the cache
+		 * while we're here.
+		 */
+		
+		if (current_request && !current_request->should_stop() && current_request->image) {
+
+			cerr << "grabbing new image from request for " << _region->name() << endl;
+			
+			img = current_request->image;
+			offset = current_request->image_offset;
+
+			/* consolidate cache first (removes fully-contained
+			 * duplicate images)
+			 */
+
+			consolidate_image_cache ();
+			
+			/* put the image into the cache so that other
+			 * WaveViews can use it if it is useful
+			 */
+
+			cerr << "Push image for " << _region->name() << ' ' << current_request->start << " .. " << current_request->end << endl;
+			
+			_image_cache[_region->audio_source (_channel)].push_back (CacheEntry (current_request->channel,
+			                                                                      current_request->height,
+			                                                                      current_request->region_amplitude,
+			                                                                      current_request->fill_color,
+			                                                                      current_request->start,
+			                                                                      current_request->end,
+			                                                                      img));
+		}
+
+		/* drop our handle on the current request */
+		current_request.reset ();
+
+		if (img) {
+			return;
+		}
+	}
+
+	/* no current image draw request, so look in the cache */
+	
+	if (get_image_from_cache (img, start, end, offset)) {
 		return;
 	}
 
@@ -1314,7 +1464,6 @@ WaveView::set_start_shift (double pixels)
 	end_visual_change ();
 }
 	
-
 void
 WaveView::cancel_my_render_request () const
 {
