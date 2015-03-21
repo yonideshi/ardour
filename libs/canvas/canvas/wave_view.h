@@ -45,7 +45,51 @@ class WaveViewTest;
 	
 namespace ArdourCanvas {
 
-class LIBCANVAS_API WaveView : public Item
+struct LIBCANVAS_API WaveViewThreadRequest
+{
+  public:
+        enum RequestType {
+	        Quit,
+	        Cancel,
+	        Draw
+        };
+        
+	WaveViewThreadRequest  () : stop (0) {}
+	
+	bool should_stop () const { return (bool) g_atomic_int_get (&stop); }
+	void cancel() { g_atomic_int_set (&stop, 1); }
+	
+	RequestType type;
+	framepos_t start;
+	framepos_t end;
+	double     width;
+	double     height;
+	double     samples_per_pixel;
+	uint16_t   channel;
+	double     region_amplitude;
+	Color      fill_color;
+	boost::weak_ptr<const ARDOUR::Region> region;
+
+	/* resulting image, after request has been satisfied */
+	
+	Cairo::RefPtr<Cairo::ImageSurface> image;
+	double image_offset;
+	
+  private:
+	gint stop; /* intended for atomic access */
+};
+
+struct LIBCANVAS_API WaveViewThreadClient
+{
+  public:
+	WaveViewThreadClient() {}
+	virtual ~WaveViewThreadClient() {}
+	
+	mutable boost::shared_ptr<WaveViewThreadRequest> current_request;
+	void send_request (boost::shared_ptr<WaveViewThreadRequest>) const;
+};
+
+class LIBCANVAS_API WaveView : public Item, public WaveViewThreadClient
 {
 public:
 
@@ -55,6 +99,7 @@ public:
         };
 
 	struct CacheEntry {
+
 		int channel;
 		Coord height;
 		float amplitude;
@@ -63,33 +108,38 @@ public:
 		framepos_t end;
 		Cairo::RefPtr<Cairo::ImageSurface> image;
 
-	CacheEntry(int chan, Coord hght, float amp, Color fcl, framepos_t strt, framepos_t ed, Cairo::RefPtr<Cairo::ImageSurface> img)  :
-		
-		channel (chan), height (hght), amplitude (amp), fill_color (fcl), 
-			start (strt), end (ed), image (img) {} 
+		CacheEntry(int chan, Coord hght, float amp, Color fcl, framepos_t strt, framepos_t ed, Cairo::RefPtr<Cairo::ImageSurface> img) 
+			: channel (chan)
+			, height (hght)
+			, amplitude (amp)
+			, fill_color (fcl)
+			, start (strt)
+			, end (ed)
+			, image (img) {}
 	};
 
 	/* final ImageSurface rendered with colours */
+
 	Cairo::RefPtr<Cairo::ImageSurface> _image;
+	PBD::Signal0<void> ImageReady;
 	
-    /* Displays a single channel of waveform data for the given Region.
+	/* Displays a single channel of waveform data for the given Region.
 
-       x = 0 in the waveview corresponds to the first waveform datum taken
-       from region->start() samples into the source data.
-
-       x = N in the waveview corresponds to the (N * spp)'th sample 
-       measured from region->start() into the source data.
-
-       when drawing, we will map the zeroth-pixel of the waveview
-       into a window. 
-
-       The waveview itself contains a set of pre-rendered Cairo::ImageSurfaces
-       that cache sections of the display. This is filled on-demand and
-       never cleared until something explicitly marks the cache invalid
-       (such as a change in samples_per_pixel, the log scaling, rectified or
-       other view parameters).
-    */
-
+	   x = 0 in the waveview corresponds to the first waveform datum taken
+	   from region->start() samples into the source data.
+	   
+	   x = N in the waveview corresponds to the (N * spp)'th sample 
+	   measured from region->start() into the source data.
+	   
+	   when drawing, we will map the zeroth-pixel of the waveview
+	   into a window. 
+	   
+	   The waveview itself contains a set of pre-rendered Cairo::ImageSurfaces
+	   that cache sections of the display. This is filled on-demand and
+	   never cleared until something explicitly marks the cache invalid
+	   (such as a change in samples_per_pixel, the log scaling, rectified or
+	   other view parameters).
+	*/
 
 	WaveView (Canvas *, boost::shared_ptr<ARDOUR::AudioRegion>);
 	WaveView (Item*, boost::shared_ptr<ARDOUR::AudioRegion>);
@@ -154,15 +204,20 @@ public:
 	void*& property_gain_function () {
 		return _foo_void;
 	}
-private:
+  private:
 	void* _foo_void;
 
 #endif
 
+  private:
         friend class ::WaveViewTest;
+        friend class WaveViewThreadClient;
 
-	static std::map <boost::shared_ptr<ARDOUR::AudioSource>, std::vector <CacheEntry> > _image_cache;
-	void consolidate_image_cache () const;
+        typedef std::map <boost::shared_ptr<ARDOUR::AudioSource>, std::vector <CacheEntry> > ImageCache;
+        static ImageCache _image_cache;
+        static Glib::Threads::Mutex cache_lock;
+        
+        void consolidate_image_cache () const;
 	void invalidate_image_cache ();
 
 	boost::shared_ptr<ARDOUR::AudioRegion> _region;
@@ -187,7 +242,19 @@ private:
 	 */
 	ARDOUR::frameoffset_t _region_start;
 
+	/** Under almost conditions, this is going to return _region->length(),
+	 * but if _region_start has been reset, then we need
+	 * to use this modified computation.
+	 */
+	ARDOUR::framecnt_t region_length() const;
+	/** Under almost conditions, this is going to return _region->start() +
+	 * _region->length(), but if _region_start has been reset, then we need
+	 * to use this modified computation.
+	 */
+	ARDOUR::framepos_t region_end() const;
+	
         PBD::ScopedConnectionList invalidation_connection;
+        PBD::ScopedConnection     image_ready_connection;
 
         static double _global_gradient_depth;
         static bool   _global_logscaled;
@@ -201,9 +268,44 @@ private:
         void handle_clip_level_change ();
 
 	void get_image (Cairo::RefPtr<Cairo::ImageSurface>& image, framepos_t start, framepos_t end, double& image_offset) const;
+	bool get_image_from_cache (Cairo::RefPtr<Cairo::ImageSurface>& image, framepos_t start, framepos_t end, double& image_offset) const;
 
         ArdourCanvas::Coord y_extent (double, bool) const;
-	void draw_image (Cairo::RefPtr<Cairo::ImageSurface>&, ARDOUR::PeakData*, int) const;
+        void draw_image (Cairo::RefPtr<Cairo::ImageSurface>&, ARDOUR::PeakData*, int n_peaks, boost::shared_ptr<WaveViewThreadRequest>) const;
+
+        typedef std::set<WaveViewThreadClient const *> DrawingRequestQueue;
+        static DrawingRequestQueue request_queue;
+        static Glib::Threads::Mutex request_queue_lock;
+        static Glib::Threads::Cond request_cond;
+
+        void cancel_my_render_request () const;
+
+        static WaveViewThreadClient global_request_object;
+
+        /* These are "current" values used for rendering. They are
+           cleared in invalidate_image_cache() and then reset in
+           render() when we get a new image.
+        */
+        
+        mutable Cairo::RefPtr<Cairo::ImageSurface> image;
+        mutable double image_offset;
+        
+        void queue_get_image (boost::shared_ptr<const ARDOUR::Region> region, framepos_t start, framepos_t end,
+                              double samples_per_pixel, uint16_t channel, Color fill_color,
+                              double height, double amplitude) const;
+        void generate_image_in_render_thread (boost::shared_ptr<WaveViewThreadRequest>) const;
+
+        static void drawing_thread ();
+        
+        static Glib::Threads::Thread* _drawing_thread;
+        static gint drawing_thread_should_quit;
+        
+        void start_drawing_thread () const;
+        void stop_drawing_thread () const;
+        
+        static void thread_get_image (boost::shared_ptr<WaveViewThreadRequest>);
+
+        void image_ready ();
 };
 
 }
