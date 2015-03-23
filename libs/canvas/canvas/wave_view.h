@@ -110,7 +110,6 @@ class LIBCANVAS_API WaveViewCache
 		Cairo::RefPtr<Cairo::ImageSurface> image;
 
 		/* last time the cache entry was used */
-		
 		uint64_t timestamp;
 		
 		Entry (int chan, Coord hght, float amp, Color fcl, double spp, framepos_t strt, framepos_t ed,
@@ -350,7 +349,6 @@ public:
 	
         ArdourCanvas::Coord y_extent (double, bool) const;
         void draw_image (Cairo::RefPtr<Cairo::ImageSurface>&, ARDOUR::PeakData*, int n_peaks, boost::shared_ptr<WaveViewThreadRequest>) const;
-	void draw_image (Cairo::RefPtr<Cairo::ImageSurface>&, ARDOUR::PeakData*, int) const;
 
         void cancel_my_render_request () const;
 
