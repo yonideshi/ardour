@@ -832,6 +832,7 @@ WaveView::draw_image (Cairo::RefPtr<Cairo::ImageSurface>& image, PeakData* _peak
 }
 
 boost::shared_ptr<WaveViewCache::Entry>
+<<<<<<< HEAD
 WaveView::cache_request_result (boost::shared_ptr<WaveViewThreadRequest> req) const
 {
 	boost::shared_ptr<WaveViewCache::Entry> ret (new WaveViewCache::Entry (req->channel,
@@ -886,6 +887,7 @@ WaveView::get_image (framepos_t start, framepos_t end) const
 				
 				cerr << "grabbing new image from request for " << debug_name() << endl;
 				
+<<<<<<< HEAD
 				cache_request_result (current_request);
 				
 			} else {
@@ -936,15 +938,7 @@ WaveView::get_image (Cairo::RefPtr<Cairo::ImageSurface>& img, framepos_t start, 
 				img = current_request->image;
 				offset = current_request->image_offset;
 				
-				images->add_to_image_cache (_region->audio_source (_channel),
-				                            WaveViewCache::Entry (current_request->channel,
-				                                                  current_request->height,
-				                                                  current_request->region_amplitude,
-				                                                  current_request->fill_color,
-				                                                  current_request->samples_per_pixel,
-				                                                  current_request->start,
-				                                                  current_request->end,
-				                                                  img));
+				images->add (_region->audio_source (_channel), ret);
 				
 				/* consolidate cache first (removes fully-contained
 				 * duplicate images)
@@ -964,32 +958,9 @@ WaveView::get_image (Cairo::RefPtr<Cairo::ImageSurface>& img, framepos_t start, 
 	}
 
 
-<<<<<<< HEAD
 	if (!ret) {
 
 		if (get_image_in_thread) {
-
-			boost::shared_ptr<WaveViewThreadRequest> req (new WaveViewThreadRequest);
-
-			req->type = WaveViewThreadRequest::Draw;
-			req->start = start;
-			req->end = end;
-			req->samples_per_pixel = _samples_per_pixel;
-			req->region = _region; /* weak ptr, to avoid storing a reference in the request queue */
-			req->channel = _channel;
-			req->width = _canvas->visible_area().width();
-			req->height = _height;
-			req->fill_color = _fill_color;
-			req->region_amplitude = _region_amplitude;
-
-			/* draw image in this (the GUI thread) */
-			
-			generate_image (req, false);
-
-			/* cache the result */
-
-			ret = cache_request_result (req);
-
 			/* reset this so that future missing images are
 			 * generated in a a worker thread.
 			 */
@@ -1189,7 +1160,6 @@ WaveView::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) cons
 	sample_end = min (region_end(), sample_end);
 	
 	// cerr << debug_name() << " will need image spanning " << sample_start << " .. " << sample_end << " region spans " << _region_start << " .. " << region_end() << endl;
-<<<<<<< HEAD
 
 	double image_offset;
 
@@ -1219,37 +1189,15 @@ WaveView::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) cons
 			cerr << debug_name() << " nothing to draw with\n";
 			return;
 		}
-=======
-
-	Cairo::RefPtr<Cairo::ImageSurface> image;
-	double image_offset;
-	
-
-	if (!(image = get_image (sample_start, sample_end, image_offset)))  {
-		/* image not currently available. A redraw will be scheduled
-		   when it is ready.
-		*/
-		cerr << debug_name() << " nothing to draw with\n";
-		return;
->>>>>>> refactored the image cache out of WaveView, fixed various issues, but several remain, plus LRU cache policy
+	}
 	}
 
 	/* fix up offset: returned value is the first sample of the returned image */
 
-<<<<<<< HEAD
 	image_offset = (_current_image->start - _region_start) / _samples_per_pixel;
-=======
-	image_offset = (image_offset - _region_start) / _samples_per_pixel;
->>>>>>> refactored the image cache out of WaveView, fixed various issues, but several remain, plus LRU cache policy
 	
 	// cerr << "Offset into image to place at zero: " << image_offset << endl;
 
-	cerr << debug_name() << " - Drawing with image of size "
-	     << image->get_width() << " x "
-	     << image->get_height() << " offset "
-	     << image_offset
-	     << endl;
-	
 	if (_start_shift && (sample_start == _region_start) && (self.x0 == draw.x0)) {
 		/* we are going to draw the first pixel for this region, but 
 		   we may not want this to overlap a border around the
@@ -1681,11 +1629,7 @@ WaveView::drawing_thread ()
 		request_queue_lock.unlock (); /* some RAII would be good here */
 
 		try {
-<<<<<<< HEAD
 			requestor->generate_image (req, true);
-=======
-			requestor->generate_image_in_render_thread (req);
->>>>>>> refactored the image cache out of WaveView, fixed various issues, but several remain, plus LRU cache policy
 		} catch (...) {
 			req->image.clear(); /* just in case it was set before the exception, whatever it was */
 		}
@@ -1702,11 +1646,7 @@ WaveView::drawing_thread ()
 /*-------------------------------------------------*/
 
 WaveViewCache::WaveViewCache ()
-<<<<<<< HEAD
 	: image_cache_size (0)
-=======
-	: _image_cache_size (0)
->>>>>>> refactored the image cache out of WaveView, fixed various issues, but several remain, plus LRU cache policy
 	, _image_cache_threshold (100 * 1048576) /* bytes */
 {
 }
@@ -1716,18 +1656,13 @@ WaveViewCache::~WaveViewCache ()
 }
 
 
-<<<<<<< HEAD
 boost::shared_ptr<WaveViewCache::Entry>
-=======
-Cairo::RefPtr<Cairo::ImageSurface>
->>>>>>> refactored the image cache out of WaveView, fixed various issues, but several remain, plus LRU cache policy
 WaveViewCache::lookup_image (boost::shared_ptr<ARDOUR::AudioSource> src,
                              framepos_t start, framepos_t end,
                              int channel,
                              Coord height,
                              float amplitude,
                              Color fill_color,
-<<<<<<< HEAD
                              double samples_per_pixel)
 {
 	ImageCache::iterator x;
@@ -1738,24 +1673,10 @@ WaveViewCache::lookup_image (boost::shared_ptr<ARDOUR::AudioSource> src,
 	}
 
 	CacheLine& caches = x->second;
-=======
-                             double samples_per_pixel,
-                             double& offset)
-{
-	ImageCache::iterator x;
-	
-	if ((x = _image_cache.find (src)) == _image_cache.end ()) {
-		/* nothing in the cache for this audio source at all */
-		return Cairo::RefPtr<Cairo::ImageSurface> ();
-	}
-
-	vector<Entry> & caches = x->second;
->>>>>>> refactored the image cache out of WaveView, fixed various issues, but several remain, plus LRU cache policy
 
 	/* Find a suitable ImageSurface, if it exists.
 	*/
 
-<<<<<<< HEAD
 	for (CacheLine::iterator c = caches.begin(); c != caches.end(); ++c) {
 
 		boost::shared_ptr<Entry> e (*c);
@@ -1776,27 +1697,6 @@ WaveViewCache::lookup_image (boost::shared_ptr<ARDOUR::AudioSource> src,
 	}
 
 	return boost::shared_ptr<Entry> ();
-=======
-	for (vector<Entry>::iterator c = caches.begin(); c != caches.end(); ++c) {
-		
-		if (channel != c->channel
-		    || height != c->height
-		    || amplitude != c->amplitude
-		    || samples_per_pixel != c->samples_per_pixel
-		    || fill_color != c->fill_color) {
-			continue;
-		}
-
-		if (end <= c->end && start >= c->start) {
-			/* found an image that covers the range we need */
-			c->timestamp = g_get_monotonic_time ();
-			offset = c->start;
-			return c->image;
-		}
-	}
-
-	return Cairo::RefPtr<Cairo::ImageSurface> ();
->>>>>>> refactored the image cache out of WaveView, fixed various issues, but several remain, plus LRU cache policy
 }
 
 void
@@ -1813,7 +1713,6 @@ WaveViewCache::consolidate_image_cache (boost::shared_ptr<ARDOUR::AudioSource> s
 
 	/* MUST BE CALLED FROM (SINGLE) GUI THREAD */
 	
-<<<<<<< HEAD
 	if ((x = cache_map.find (src)) == cache_map.end ()) {
 		return;
 	}
@@ -1832,24 +1731,6 @@ WaveViewCache::consolidate_image_cache (boost::shared_ptr<ARDOUR::AudioSource> s
 		    || amplitude != e1->amplitude
 		    || samples_per_pixel != e1->samples_per_pixel
 		    || fill_color != e1->fill_color) {
-=======
-	if ((x = _image_cache.find (src)) == _image_cache.end ()) {
-		return;
-	}
-
-	vector<Entry>& caches  = x->second;
-
-	for (vector<Entry>::iterator c1 = caches.begin(); c1 != caches.end(); ) {
-
-		vector<Entry>::iterator nxt = c1;
-		++nxt;
-
-		if (channel != c1->channel
-		    || height != c1->height
-		    || amplitude != c1->amplitude
-		    || samples_per_pixel != c1->samples_per_pixel
-		    || fill_color != c1->fill_color) {
->>>>>>> refactored the image cache out of WaveView, fixed various issues, but several remain, plus LRU cache policy
 
 			/* doesn't match current properties, ignore and move on
 			 * to the next one.
@@ -1866,7 +1747,6 @@ WaveViewCache::consolidate_image_cache (boost::shared_ptr<ARDOUR::AudioSource> s
 		 * subsets of the range covered by this one.
 		 */
 
-<<<<<<< HEAD
 		for (CacheLine::iterator c2 = c1; c2 != caches.end(); ) {
 
 			CacheLine::iterator nxt2 = c2;
@@ -1879,18 +1759,6 @@ WaveViewCache::consolidate_image_cache (boost::shared_ptr<ARDOUR::AudioSource> s
 			    || amplitude != e2->amplitude
 			    || samples_per_pixel != e2->samples_per_pixel
 			    || fill_color != e2->fill_color) {
-=======
-		for (vector<Entry>::iterator c2 = c1; c2 != caches.end(); ) {
-
-			vector<Entry>::iterator nxt2 = c2;
-			++nxt2;
-		
-			if (c1 == c2 || channel != c2->channel
-			    || height != c2->height
-			    || amplitude != c2->amplitude
-			    || samples_per_pixel != c2->samples_per_pixel
-			    || fill_color != c2->fill_color) {
->>>>>>> refactored the image cache out of WaveView, fixed various issues, but several remain, plus LRU cache policy
 
 				/* properties do not match, ignore for the
 				 * purposes of consolidation.
@@ -1899,11 +1767,7 @@ WaveViewCache::consolidate_image_cache (boost::shared_ptr<ARDOUR::AudioSource> s
 				continue;
 			}
 			
-<<<<<<< HEAD
 			if (e2->start >= e1->start && e2->end <= e1->end) {
-=======
-			if (c2->start >= c1->start && c2->end <= c1->end) {
->>>>>>> refactored the image cache out of WaveView, fixed various issues, but several remain, plus LRU cache policy
 				/* c2 is fully contained by c1, so delete it */
 				c2 = caches.erase (c2);
 				continue;
@@ -1917,7 +1781,6 @@ WaveViewCache::consolidate_image_cache (boost::shared_ptr<ARDOUR::AudioSource> s
 }
 
 void
-<<<<<<< HEAD
 WaveViewCache::use (boost::shared_ptr<ARDOUR::AudioSource> src, boost::shared_ptr<Entry> ce)
 {
 	ce->timestamp = g_get_monotonic_time ();
@@ -1940,40 +1803,16 @@ WaveViewCache::add (boost::shared_ptr<ARDOUR::AudioSource> src, boost::shared_pt
 
 	cache_map[src].push_back (ce);
 	cache_list.push_back (make_pair (src, ce));
-=======
-WaveViewCache::add_to_image_cache (boost::shared_ptr<ARDOUR::AudioSource> src, Entry ce)
-{
-	/* MUST BE CALLED FROM (SINGLE) GUI THREAD */
-	
-	Cairo::RefPtr<Cairo::ImageSurface> img (ce.image);
-
-	_image_cache_size += img->get_height() * img->get_width () * 4; /* 4 = bytes per FORMAT_ARGB32 pixel */
-
-	if (cache_full()) {
-		cache_fifo_flush ();
-	}
-
-	ce.timestamp = g_get_monotonic_time ();
-
-	_image_cache[src].push_back (ce);
->>>>>>> refactored the image cache out of WaveView, fixed various issues, but several remain, plus LRU cache policy
 }
 
 uint64_t
 WaveViewCache::compute_image_cache_size()
 {
 	uint64_t total = 0;
-<<<<<<< HEAD
 	for (ImageCache::iterator s = cache_map.begin(); s != cache_map.end(); ++s) {
 		CacheLine& per_source_cache (s->second);
 		for (CacheLine::iterator c = per_source_cache.begin(); c != per_source_cache.end(); ++c) {
 			Cairo::RefPtr<Cairo::ImageSurface> img ((*c)->image);
-=======
-	for (ImageCache::iterator s = _image_cache.begin(); s != _image_cache.end(); ++s) {
-		vector<Entry>& per_source_cache (s->second);
-		for (vector<Entry>::iterator c = per_source_cache.begin(); c != per_source_cache.end(); ++c) {
-			Cairo::RefPtr<Cairo::ImageSurface> img (c->image);
->>>>>>> refactored the image cache out of WaveView, fixed various issues, but several remain, plus LRU cache policy
 			total += img->get_height() * img->get_width() * 4; /* 4 = bytes per FORMAT_ARGB32 pixel */
 		}
 	}
@@ -1983,7 +1822,6 @@ WaveViewCache::compute_image_cache_size()
 bool
 WaveViewCache::cache_full()
 {
-<<<<<<< HEAD
 	return image_cache_size > _image_cache_threshold;
 }
 
@@ -2037,16 +1875,6 @@ WaveViewCache::cache_flush ()
 		/* Remove from the linear list */
 		cache_list.erase (cache_list.begin());
 	}
-=======
-	return _image_cache_size > _image_cache_threshold;
-}
-
-void
-WaveViewCache::cache_fifo_flush ()
-{
-	/* reset our current size */
-	_image_cache_size = compute_image_cache_size();
->>>>>>> refactored the image cache out of WaveView, fixed various issues, but several remain, plus LRU cache policy
 }
 
 void

@@ -165,7 +165,7 @@ class LIBCANVAS_API WaveViewCache
         typedef std::vector<ListEntry> CacheList;
         CacheList cache_list;
  
-       struct SortByTimestamp {
+        struct SortByTimestamp {
 	        bool operator() (const WaveViewCache::ListEntry& a, const WaveViewCache::ListEntry& b) {
 		        return a.second->timestamp < b.second->timestamp;
 	        }
