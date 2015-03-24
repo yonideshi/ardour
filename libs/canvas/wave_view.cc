@@ -35,6 +35,7 @@
 #include "ardour/types.h"
 #include "ardour/dB.h"
 #include "ardour/audioregion.h"
+#include "ardour/audiosource.h"
 
 #include "canvas/wave_view.h"
 #include "canvas/utils.h"
@@ -228,6 +229,7 @@ void
 WaveView::invalidate_image_cache ()
 {
 	cancel_my_render_request ();
+	_current_image.reset ();
 }
 
 Coord
@@ -639,10 +641,10 @@ WaveView::draw_image (Cairo::RefPtr<Cairo::ImageSurface>& image, PeakData* _peak
 	context->fill ();
 }
 
-Cairo::RefPtr<Cairo::ImageSurface>
-WaveView::get_image (framepos_t start, framepos_t end, double& offset) const
+boost::shared_ptr<WaveViewCache::Entry>
+WaveView::get_image (framepos_t start, framepos_t end) const
 {
-	Cairo::RefPtr<Cairo::ImageSurface> img;
+	boost::shared_ptr<WaveViewCache::Entry> ret;
 	
 	/* this is called from a ::render() call, when we need an image to
 	   draw with.
@@ -666,18 +668,16 @@ WaveView::get_image (framepos_t start, framepos_t end, double& offset) const
 				
 				cerr << "grabbing new image from request for " << debug_name() << endl;
 				
-				img = current_request->image;
-				offset = current_request->image_offset;
+				ret.reset (new WaveViewCache::Entry (current_request->channel,
+				                                     current_request->height,
+				                                     current_request->region_amplitude,
+				                                     current_request->fill_color,
+				                                     current_request->samples_per_pixel,
+				                                     current_request->start,
+				                                     current_request->end,
+				                                     current_request->image));
 				
-				images->add_to_image_cache (_region->audio_source (_channel),
-				                            WaveViewCache::Entry (current_request->channel,
-				                                                  current_request->height,
-				                                                  current_request->region_amplitude,
-				                                                  current_request->fill_color,
-				                                                  current_request->samples_per_pixel,
-				                                                  current_request->start,
-				                                                  current_request->end,
-				                                                  img));
+				images->add (_region->audio_source (_channel), ret);
 				
 				/* consolidate cache first (removes fully-contained
 				 * duplicate images)
@@ -697,32 +697,31 @@ WaveView::get_image (framepos_t start, framepos_t end, double& offset) const
 	}
 
 
-	if (!img) {
+	if (!ret) {
 
 		/* no current image draw request, so look in the cache */
 		
-		img = get_image_from_cache (start, end, offset);
+		ret = get_image_from_cache (start, end);
 
 	}
 
-	if (!img) {
+	if (!ret) {
 		queue_get_image (_region, start, end);
 	}
 
-	return img;
+	return ret;
 }
 
 
-Cairo::RefPtr<Cairo::ImageSurface>
-WaveView::get_image_from_cache (framepos_t start, framepos_t end, double& offset) const
+boost::shared_ptr<WaveViewCache::Entry>
+WaveView::get_image_from_cache (framepos_t start, framepos_t end) const
 {
 	if (!images) {
-		return Cairo::RefPtr<Cairo::ImageSurface> ();
+		return boost::shared_ptr<WaveViewCache::Entry>();
 	}
 
 	return images->lookup_image (_region->audio_source (_channel), start, end, _channel,
-	                             _height, _region_amplitude, _fill_color, _samples_per_pixel,
-	                             offset);
+	                             _height, _region_amplitude, _fill_color, _samples_per_pixel);
 }
 
 void
@@ -781,7 +780,6 @@ WaveView::generate_image_in_render_thread (boost::shared_ptr<WaveViewThreadReque
 		                     req->samples_per_pixel);
 		
 		req->image = Cairo::ImageSurface::create (Cairo::FORMAT_ARGB32, n_peaks, req->height);
-		req->image_offset = req->start - sample_start; /* likely zero, but not necessarily */
 		
 		/* make sure we record the sample positions that were actually used */
 		
@@ -896,30 +894,42 @@ WaveView::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) cons
 	
 	// cerr << debug_name() << " will need image spanning " << sample_start << " .. " << sample_end << " region spans " << _region_start << " .. " << region_end() << endl;
 
-	Cairo::RefPtr<Cairo::ImageSurface> image;
 	double image_offset;
-	
 
-	if (!(image = get_image (sample_start, sample_end, image_offset)))  {
-		/* image not currently available. A redraw will be scheduled
-		   when it is ready.
-		*/
-		cerr << debug_name() << " nothing to draw with\n";
-		return;
+	if (_current_image) {
+
+		/* check it covers the right sample range */
+		
+		if (_current_image->start > sample_start || _current_image->end < sample_end) {
+			/* doesn't cover the area we need ... reset */
+			_current_image.reset ();
+		} else {
+			/* timestamp our continuing use of this image/cache entry */
+			images->use (_region->audio_source (_channel), _current_image);
+		}
+	}
+
+	if (!_current_image) {
+
+		/* look it up */
+		
+		_current_image = get_image (sample_start, sample_end);
+
+		if (!_current_image) {
+			/* image not currently available. A redraw will be scheduled
+			   when it is ready.
+			*/
+			cerr << debug_name() << " nothing to draw with\n";
+			return;
+		}
 	}
 
 	/* fix up offset: returned value is the first sample of the returned image */
 
-	image_offset = (image_offset - _region_start) / _samples_per_pixel;
+	image_offset = (_current_image->start - _region_start) / _samples_per_pixel;
 	
 	// cerr << "Offset into image to place at zero: " << image_offset << endl;
 
-	cerr << debug_name() << " - Drawing with image of size "
-	     << image->get_width() << " x "
-	     << image->get_height() << " offset "
-	     << image_offset
-	     << endl;
-	
 	if (_start_shift && (sample_start == _region_start) && (self.x0 == draw.x0)) {
 		/* we are going to draw the first pixel for this region, but 
 		   we may not want this to overlap a border around the
@@ -943,7 +953,7 @@ WaveView::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) cons
 	y = round (y);
 	context->device_to_user (x, y);
 
-	context->set_source (image, x, y);
+	context->set_source (_current_image->image, x, y);
 	context->fill ();
 
 }
@@ -1292,7 +1302,7 @@ WaveView::drawing_thread ()
 /*-------------------------------------------------*/
 
 WaveViewCache::WaveViewCache ()
-	: _image_cache_size (0)
+	: image_cache_size (0)
 	, _image_cache_threshold (100 * 1048576) /* bytes */
 {
 }
@@ -1302,47 +1312,47 @@ WaveViewCache::~WaveViewCache ()
 }
 
 
-Cairo::RefPtr<Cairo::ImageSurface>
+boost::shared_ptr<WaveViewCache::Entry>
 WaveViewCache::lookup_image (boost::shared_ptr<ARDOUR::AudioSource> src,
                              framepos_t start, framepos_t end,
                              int channel,
                              Coord height,
                              float amplitude,
                              Color fill_color,
-                             double samples_per_pixel,
-                             double& offset)
+                             double samples_per_pixel)
 {
 	ImageCache::iterator x;
 	
-	if ((x = _image_cache.find (src)) == _image_cache.end ()) {
+	if ((x = cache_map.find (src)) == cache_map.end ()) {
 		/* nothing in the cache for this audio source at all */
-		return Cairo::RefPtr<Cairo::ImageSurface> ();
+		return boost::shared_ptr<WaveViewCache::Entry> ();
 	}
 
-	vector<Entry> & caches = x->second;
+	CacheLine& caches = x->second;
 
 	/* Find a suitable ImageSurface, if it exists.
 	*/
 
-	for (vector<Entry>::iterator c = caches.begin(); c != caches.end(); ++c) {
+	for (CacheLine::iterator c = caches.begin(); c != caches.end(); ++c) {
+
+		boost::shared_ptr<Entry> e (*c);
 		
-		if (channel != c->channel
-		    || height != c->height
-		    || amplitude != c->amplitude
-		    || samples_per_pixel != c->samples_per_pixel
-		    || fill_color != c->fill_color) {
+		if (channel != e->channel
+		    || height != e->height
+		    || amplitude != e->amplitude
+		    || samples_per_pixel != e->samples_per_pixel
+		    || fill_color != e->fill_color) {
 			continue;
 		}
 
-		if (end <= c->end && start >= c->start) {
+		if (end <= e->end && start >= e->start) {
 			/* found an image that covers the range we need */
-			c->timestamp = g_get_monotonic_time ();
-			offset = c->start;
-			return c->image;
+			use (src, e);
+			return e;
 		}
 	}
 
-	return Cairo::RefPtr<Cairo::ImageSurface> ();
+	return boost::shared_ptr<Entry> ();
 }
 
 void
@@ -1359,22 +1369,24 @@ WaveViewCache::consolidate_image_cache (boost::shared_ptr<ARDOUR::AudioSource> s
 
 	/* MUST BE CALLED FROM (SINGLE) GUI THREAD */
 	
-	if ((x = _image_cache.find (src)) == _image_cache.end ()) {
+	if ((x = cache_map.find (src)) == cache_map.end ()) {
 		return;
 	}
 
-	vector<Entry>& caches  = x->second;
+	CacheLine& caches  = x->second;
 
-	for (vector<Entry>::iterator c1 = caches.begin(); c1 != caches.end(); ) {
+	for (CacheLine::iterator c1 = caches.begin(); c1 != caches.end(); ) {
 
-		vector<Entry>::iterator nxt = c1;
+		CacheLine::iterator nxt = c1;
 		++nxt;
 
-		if (channel != c1->channel
-		    || height != c1->height
-		    || amplitude != c1->amplitude
-		    || samples_per_pixel != c1->samples_per_pixel
-		    || fill_color != c1->fill_color) {
+		boost::shared_ptr<Entry> e1 (*c1);
+		
+		if (channel != e1->channel
+		    || height != e1->height
+		    || amplitude != e1->amplitude
+		    || samples_per_pixel != e1->samples_per_pixel
+		    || fill_color != e1->fill_color) {
 
 			/* doesn't match current properties, ignore and move on
 			 * to the next one.
@@ -1391,16 +1403,18 @@ WaveViewCache::consolidate_image_cache (boost::shared_ptr<ARDOUR::AudioSource> s
 		 * subsets of the range covered by this one.
 		 */
 
-		for (vector<Entry>::iterator c2 = c1; c2 != caches.end(); ) {
+		for (CacheLine::iterator c2 = c1; c2 != caches.end(); ) {
 
-			vector<Entry>::iterator nxt2 = c2;
+			CacheLine::iterator nxt2 = c2;
 			++nxt2;
-		
-			if (c1 == c2 || channel != c2->channel
-			    || height != c2->height
-			    || amplitude != c2->amplitude
-			    || samples_per_pixel != c2->samples_per_pixel
-			    || fill_color != c2->fill_color) {
+
+			boost::shared_ptr<Entry> e2 (*c2);
+			
+			if (e1 == e2 || channel != e2->channel
+			    || height != e2->height
+			    || amplitude != e2->amplitude
+			    || samples_per_pixel != e2->samples_per_pixel
+			    || fill_color != e2->fill_color) {
 
 				/* properties do not match, ignore for the
 				 * purposes of consolidation.
@@ -1409,7 +1423,7 @@ WaveViewCache::consolidate_image_cache (boost::shared_ptr<ARDOUR::AudioSource> s
 				continue;
 			}
 			
-			if (c2->start >= c1->start && c2->end <= c1->end) {
+			if (e2->start >= e1->start && e2->end <= e1->end) {
 				/* c2 is fully contained by c1, so delete it */
 				c2 = caches.erase (c2);
 				continue;
@@ -1423,31 +1437,38 @@ WaveViewCache::consolidate_image_cache (boost::shared_ptr<ARDOUR::AudioSource> s
 }
 
 void
-WaveViewCache::add_to_image_cache (boost::shared_ptr<ARDOUR::AudioSource> src, Entry ce)
+WaveViewCache::use (boost::shared_ptr<ARDOUR::AudioSource> src, boost::shared_ptr<Entry> ce)
+{
+	ce->timestamp = g_get_monotonic_time ();
+}
+
+void
+WaveViewCache::add (boost::shared_ptr<ARDOUR::AudioSource> src, boost::shared_ptr<Entry> ce)
 {
 	/* MUST BE CALLED FROM (SINGLE) GUI THREAD */
 	
-	Cairo::RefPtr<Cairo::ImageSurface> img (ce.image);
+	Cairo::RefPtr<Cairo::ImageSurface> img (ce->image);
 
-	_image_cache_size += img->get_height() * img->get_width () * 4; /* 4 = bytes per FORMAT_ARGB32 pixel */
+	image_cache_size += img->get_height() * img->get_width () * 4; /* 4 = bytes per FORMAT_ARGB32 pixel */
 
 	if (cache_full()) {
-		cache_fifo_flush ();
+		cache_flush ();
 	}
 
-	ce.timestamp = g_get_monotonic_time ();
+	ce->timestamp = g_get_monotonic_time ();
 
-	_image_cache[src].push_back (ce);
+	cache_map[src].push_back (ce);
+	cache_list.push_back (make_pair (src, ce));
 }
 
 uint64_t
 WaveViewCache::compute_image_cache_size()
 {
 	uint64_t total = 0;
-	for (ImageCache::iterator s = _image_cache.begin(); s != _image_cache.end(); ++s) {
-		vector<Entry>& per_source_cache (s->second);
-		for (vector<Entry>::iterator c = per_source_cache.begin(); c != per_source_cache.end(); ++c) {
-			Cairo::RefPtr<Cairo::ImageSurface> img (c->image);
+	for (ImageCache::iterator s = cache_map.begin(); s != cache_map.end(); ++s) {
+		CacheLine& per_source_cache (s->second);
+		for (CacheLine::iterator c = per_source_cache.begin(); c != per_source_cache.end(); ++c) {
+			Cairo::RefPtr<Cairo::ImageSurface> img ((*c)->image);
 			total += img->get_height() * img->get_width() * 4; /* 4 = bytes per FORMAT_ARGB32 pixel */
 		}
 	}
@@ -1457,13 +1478,64 @@ WaveViewCache::compute_image_cache_size()
 bool
 WaveViewCache::cache_full()
 {
-	return _image_cache_size > _image_cache_threshold;
+	return image_cache_size > _image_cache_threshold;
 }
 
 void
-WaveViewCache::cache_fifo_flush ()
+WaveViewCache::cache_flush ()
 {
-	/* reset our current size */
-	_image_cache_size = compute_image_cache_size();
+	SortByTimestamp sorter;
+
+	/* sort list in LRU order */
+
+	sort (cache_list.begin(), cache_list.end(), sorter);
+
+	while (image_cache_size > _image_cache_threshold) {
+
+		ListEntry& le (cache_list.front());
+
+		ImageCache::iterator x;
+		
+		if ((x = cache_map.find (le.first)) == cache_map.end ()) {
+			/* wierd ... no entry for this AudioSource */
+			continue;
+		}
+		
+		CacheLine& cl  = x->second;
+
+		for (CacheLine::iterator c = cl.begin(); c != cl.end(); ++c) {
+
+			if (*c == le.second) {
+
+				/* Remove this entry from this cache line */
+				cl.erase (c);
+
+				if (cl.empty()) {
+					/* remove cache line from main cache: no more entries */
+					cache_map.erase (x);
+				}
+
+				break;
+			}
+		}
+		
+		Cairo::RefPtr<Cairo::ImageSurface> img (le.second->image);
+		uint64_t size = img->get_height() * img->get_width() * 4; /* 4 = bytes per FORMAT_ARGB32 pixel */
+
+		if (image_cache_size > size) {
+			image_cache_size -= size;
+		} else {
+			image_cache_size = 0;
+		}
+      
+		/* Remove from the linear list */
+		cache_list.erase (cache_list.begin());
+	}
 }
 
+void
+WaveViewCache::set_image_cache_threshold (uint64_t sz)
+{
+	_image_cache_threshold = sz;
+	cache_flush ();
+}

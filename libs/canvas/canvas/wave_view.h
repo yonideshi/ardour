@@ -73,7 +73,6 @@ struct LIBCANVAS_API WaveViewThreadRequest
 	/* resulting image, after request has been satisfied */
 	
 	Cairo::RefPtr<Cairo::ImageSurface> image;
-	double image_offset;
 	
   private:
 	gint stop; /* intended for atomic access */
@@ -111,8 +110,12 @@ class LIBCANVAS_API WaveViewCache
 			, image (img) {}
 	};
 
-	void add_to_image_cache (boost::shared_ptr<ARDOUR::AudioSource>, WaveViewCache::Entry);
-
+	uint64_t image_cache_threshold () const { return _image_cache_threshold; }
+	void set_image_cache_threshold (uint64_t);
+	
+	void add (boost::shared_ptr<ARDOUR::AudioSource>, boost::shared_ptr<Entry>);
+	void use (boost::shared_ptr<ARDOUR::AudioSource>, boost::shared_ptr<Entry>);
+	
         void consolidate_image_cache (boost::shared_ptr<ARDOUR::AudioSource>,
                                       int channel,
                                       Coord height,
@@ -120,26 +123,43 @@ class LIBCANVAS_API WaveViewCache
                                       Color fill_color,
                                       double samples_per_pixel);
 
-        Cairo::RefPtr<Cairo::ImageSurface> lookup_image (boost::shared_ptr<ARDOUR::AudioSource>,
-                                                         framepos_t start, framepos_t end,
-                                                         int _channel,
-                                                         Coord height,
-                                                         float amplitude,
-                                                         Color fill_color,
-                                                         double samples_per_pixel,
-                                                         double& offset);
+        boost::shared_ptr<Entry> lookup_image (boost::shared_ptr<ARDOUR::AudioSource>,
+                                               framepos_t start, framepos_t end,
+                                               int _channel,
+                                               Coord height,
+                                               float amplitude,
+                                               Color fill_color,
+                                               double samples_per_pixel);
 
   private:
-        typedef std::map <boost::shared_ptr<ARDOUR::AudioSource>,std::vector<Entry> > ImageCache;
-        ImageCache _image_cache;
+        /* Indexed, non-sortable structure used to lookup images associated
+         * with a particular AudioSource
+         */
+        typedef std::vector<boost::shared_ptr<Entry> > CacheLine;
+        typedef std::map <boost::shared_ptr<ARDOUR::AudioSource>,CacheLine> ImageCache;
+        ImageCache cache_map;
 
-        uint64_t _image_cache_size;
+        /* Linear, sortable structure used when we need to do a timestamp-based
+         * flush of entries from the cache.
+         */
+        typedef std::pair<boost::shared_ptr<ARDOUR::AudioSource>,boost::shared_ptr<Entry> > ListEntry;
+        typedef std::vector<ListEntry> CacheList;
+        CacheList cache_list;
+
+        struct SortByTimestamp
+        {
+	        bool operator() (const WaveViewCache::ListEntry& a, const WaveViewCache::ListEntry& b) {
+		        return a.second->timestamp < b.second->timestamp;
+	        }
+        };
+        friend struct SortByTimestamp;
+        
+        uint64_t image_cache_size;
         uint64_t _image_cache_threshold;
 
         uint64_t compute_image_cache_size ();
-        void cache_fifo_flush ();
+        void cache_flush ();
         bool cache_full ();
-
 };
 
 class LIBCANVAS_API WaveView : public Item, public sigc::trackable
@@ -300,8 +320,8 @@ public:
         void handle_visual_property_change ();
         void handle_clip_level_change ();
 
-        Cairo::RefPtr<Cairo::ImageSurface> get_image (framepos_t start, framepos_t end, double& image_offset) const;
-        Cairo::RefPtr<Cairo::ImageSurface> get_image_from_cache (framepos_t start, framepos_t end, double& image_offset) const;
+        boost::shared_ptr<WaveViewCache::Entry> get_image (framepos_t start, framepos_t end) const;
+        boost::shared_ptr<WaveViewCache::Entry> get_image_from_cache (framepos_t start, framepos_t end) const;
 	
         ArdourCanvas::Coord y_extent (double, bool) const;
         void draw_image (Cairo::RefPtr<Cairo::ImageSurface>&, ARDOUR::PeakData*, int n_peaks, boost::shared_ptr<WaveViewThreadRequest>) const;
@@ -312,7 +332,9 @@ public:
         void generate_image_in_render_thread (boost::shared_ptr<WaveViewThreadRequest>) const;
         
         void image_ready ();
-
+        
+        mutable boost::shared_ptr<WaveViewCache::Entry> _current_image;
+        
 	mutable boost::shared_ptr<WaveViewThreadRequest> current_request;
 	void send_request (boost::shared_ptr<WaveViewThreadRequest>) const;
 	bool idle_send_request (boost::shared_ptr<WaveViewThreadRequest>) const;
