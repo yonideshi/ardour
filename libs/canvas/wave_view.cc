@@ -44,6 +44,8 @@
 
 #include <gdkmm/general.h>
 
+#include "gtk2_ardour/gui_thread.h"
+
 using namespace std;
 using namespace ARDOUR;
 using namespace ArdourCanvas;
@@ -85,6 +87,10 @@ WaveView::WaveView (Canvas* c, boost::shared_ptr<ARDOUR::AudioRegion> region)
 	, _region_start (region->start())
 	, get_image_in_thread (false)
 {
+	_region->DropReferences.connect (_source_invalidated_connection, MISSING_INVALIDATOR,
+						     boost::bind (&ArdourCanvas::WaveView::invalidate_source,
+								  this, boost::weak_ptr<AudioSource>(_region->audio_source())), gui_context());
+
 	VisualPropertiesChanged.connect_same_thread (invalidation_connection, boost::bind (&WaveView::handle_visual_property_change, this));
 	ClipLevelChanged.connect_same_thread (invalidation_connection, boost::bind (&WaveView::handle_clip_level_change, this));
 
@@ -111,6 +117,10 @@ WaveView::WaveView (Item* parent, boost::shared_ptr<ARDOUR::AudioRegion> region)
 	, _region_start (region->start())
 	, get_image_in_thread (false)
 {
+	_region->DropReferences.connect (_source_invalidated_connection, MISSING_INVALIDATOR,
+						     boost::bind (&ArdourCanvas::WaveView::invalidate_source,
+								  this, boost::weak_ptr<AudioSource>(_region->audio_source())), gui_context());
+
 	VisualPropertiesChanged.connect_same_thread (invalidation_connection, boost::bind (&WaveView::handle_visual_property_change, this));
 	ClipLevelChanged.connect_same_thread (invalidation_connection, boost::bind (&WaveView::handle_clip_level_change, this));
 
@@ -119,6 +129,7 @@ WaveView::WaveView (Item* parent, boost::shared_ptr<ARDOUR::AudioRegion> region)
 
 WaveView::~WaveView ()
 {
+	_source_invalidated_connection.disconnect();
 	invalidate_image_cache ();
 }
 
@@ -228,7 +239,7 @@ WaveView::set_clip_level (double dB)
 }
 
 void
-WaveView::invalidate_image_cache ()
+WaveView::invalidate_source (boost::weak_ptr<AudioSource> src)
 {
 	cancel_my_render_request ();
 	_current_image.reset ();
