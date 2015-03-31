@@ -34,6 +34,7 @@
 
 #include "ardour/types.h"
 #include "ardour/dB.h"
+#include "ardour/lmath.h"
 #include "ardour/audioregion.h"
 #include "ardour/audiosource.h"
 
