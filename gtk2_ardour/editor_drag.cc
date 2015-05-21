@@ -2401,7 +2401,7 @@ NoteResizeDrag::motion (GdkEvent* event, bool /*first_move*/)
 			if (!ArdourKeyboard::indicates_snap_delta (event->button.state)) {
 				sd = _snap_delta;
 			}
-			mrv->update_resizing (nb, at_front, _drags->current_pointer_x() - grab_x(), relative, sd);
+			mrv->update_resizing (nb, at_front, _drags->current_pointer_x() - grab_x(), relative, sd, event->button.state);
 		}
 	}
 }
@@ -2419,7 +2419,7 @@ NoteResizeDrag::finished (GdkEvent* event, bool /*movement_occurred*/)
 			sd = _snap_delta;
 		}
 		if (mrv) {
-			mrv->commit_resizing (nb, at_front, _drags->current_pointer_x() - grab_x(), relative, sd);
+			mrv->commit_resizing (nb, at_front, _drags->current_pointer_x() - grab_x(), relative, sd, event->button.state);
 		}
 	}
 
@@ -5217,6 +5217,11 @@ NoteDrag::total_dx (guint const state) const
 	st = max (st, rp);
 
 	/* snap and return corresponding delta */
+
+	if (ArdourKeyboard::indicates_snap (state)) {
+		return (st - rp) + rp - n - snap_delta (state);
+	}
+
 	return _region->snap_frame_to_frame (st - rp) + rp - n - snap_delta (state);
 }
 
