@@ -88,6 +88,15 @@ class LIBCANVAS_API WaveViewCache
 	
 	struct Entry {
 
+		/* these properties define the cache entry as unique.
+
+		   If an image is in use by a WaveView and any of these
+		   properties are modified on the WaveView, the image can no
+		   longer be used (or may no longer be usable for start/end
+		   parameters). It will remain in the cache until flushed for
+		   some reason (typically the cache is full).
+		*/
+
 		int channel;
 		Coord height;
 		float amplitude;
@@ -95,7 +104,13 @@ class LIBCANVAS_API WaveViewCache
 		double samples_per_pixel;
 		framepos_t start;
 		framepos_t end;
+
+		/* the actual image referred to by the cache entry */
+
 		Cairo::RefPtr<Cairo::ImageSurface> image;
+
+		/* last time the cache entry was used */
+		
 		uint64_t timestamp;
 		
 		Entry (int chan, Coord hght, float amp, Color fcl, double spp, framepos_t strt, framepos_t ed,
@@ -132,10 +147,15 @@ class LIBCANVAS_API WaveViewCache
                                                double samples_per_pixel);
 
   private:
+        /* an unsorted, unindexd collection of cache entries associated with
+           a particular AudioSource. All cache Entries in the collection
+           share the AudioSource in common, but represent different parameter
+           settings (e.g. height, color, samples per pixel etc.)
+        */
+        typedef std::vector<boost::shared_ptr<Entry> > CacheLine;
         /* Indexed, non-sortable structure used to lookup images associated
          * with a particular AudioSource
          */
-        typedef std::vector<boost::shared_ptr<Entry> > CacheLine;
         typedef std::map <boost::shared_ptr<ARDOUR::AudioSource>,CacheLine> ImageCache;
         ImageCache cache_map;
 
@@ -145,9 +165,8 @@ class LIBCANVAS_API WaveViewCache
         typedef std::pair<boost::shared_ptr<ARDOUR::AudioSource>,boost::shared_ptr<Entry> > ListEntry;
         typedef std::vector<ListEntry> CacheList;
         CacheList cache_list;
-
-        struct SortByTimestamp
-        {
+ 
+       struct SortByTimestamp {
 	        bool operator() (const WaveViewCache::ListEntry& a, const WaveViewCache::ListEntry& b) {
 		        return a.second->timestamp < b.second->timestamp;
 	        }
