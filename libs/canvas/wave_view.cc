@@ -832,7 +832,6 @@ WaveView::draw_image (Cairo::RefPtr<Cairo::ImageSurface>& image, PeakData* _peak
 }
 
 boost::shared_ptr<WaveViewCache::Entry>
-<<<<<<< HEAD
 WaveView::cache_request_result (boost::shared_ptr<WaveViewThreadRequest> req) const
 {
 	boost::shared_ptr<WaveViewCache::Entry> ret (new WaveViewCache::Entry (req->channel,
@@ -887,7 +886,6 @@ WaveView::get_image (framepos_t start, framepos_t end) const
 				
 				cerr << "grabbing new image from request for " << debug_name() << endl;
 				
-<<<<<<< HEAD
 				cache_request_result (current_request);
 				
 			} else {
@@ -938,15 +936,7 @@ WaveView::get_image (Cairo::RefPtr<Cairo::ImageSurface>& img, framepos_t start, 
 				img = current_request->image;
 				offset = current_request->image_offset;
 				
-				images->add (_region->audio_source (_channel), ret);
-				
-				/* consolidate cache first (removes fully-contained
-				 * duplicate images)
-				 */
-				
-				images->consolidate_image_cache (_region->audio_source (_channel),
-				                                 _channel, _height, _region_amplitude,
-				                                 _fill_color, _samples_per_pixel);
+				cache_request_result (current_request);
 				
 			} else {
 				cerr << debug_name() << " ignoring stale request\n";
@@ -961,13 +951,34 @@ WaveView::get_image (Cairo::RefPtr<Cairo::ImageSurface>& img, framepos_t start, 
 	if (!ret) {
 
 		if (get_image_in_thread) {
+
+			boost::shared_ptr<WaveViewThreadRequest> req (new WaveViewThreadRequest);
+
+			req->type = WaveViewThreadRequest::Draw;
+			req->start = start;
+			req->end = end;
+			req->samples_per_pixel = _samples_per_pixel;
+			req->region = _region; /* weak ptr, to avoid storing a reference in the request queue */
+			req->channel = _channel;
+			req->width = _canvas->visible_area().width();
+			req->height = _height;
+			req->fill_color = _fill_color;
+			req->region_amplitude = _region_amplitude;
+
+			/* draw image in this (the GUI thread) */
+			
+			generate_image (req, false);
+
+			/* cache the result */
+
+			ret = cache_request_result (req);
+
 			/* reset this so that future missing images are
 			 * generated in a a worker thread.
 			 */
 			
 			get_image_in_thread = false;
 
-			
 		} else {
 			queue_get_image (_region, start, end);
 		}
