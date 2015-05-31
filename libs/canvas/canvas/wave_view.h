@@ -324,6 +324,13 @@ public:
 	 * to use this modified computation.
 	 */
 	ARDOUR::framepos_t region_end() const;
+
+	/* If true, calls to get_image() will render a missing wave image
+	   in the calling thread. Generally set to false, but true after a
+	   call to set_height().
+	*/
+	mutable bool get_image_in_thread;
+
 	
         PBD::ScopedConnectionList invalidation_connection;
         PBD::ScopedConnection     image_ready_connection;
@@ -348,7 +355,8 @@ public:
         void cancel_my_render_request () const;
 
         void queue_get_image (boost::shared_ptr<const ARDOUR::Region> region, framepos_t start, framepos_t end) const;
-        void generate_image_in_render_thread (boost::shared_ptr<WaveViewThreadRequest>) const;
+        void generate_image (boost::shared_ptr<WaveViewThreadRequest>, bool in_render_thread) const;
+        boost::shared_ptr<WaveViewCache::Entry> cache_request_result (boost::shared_ptr<WaveViewThreadRequest> req) const;
         
         void image_ready ();
         
@@ -357,7 +365,7 @@ public:
 	mutable boost::shared_ptr<WaveViewThreadRequest> current_request;
 	void send_request (boost::shared_ptr<WaveViewThreadRequest>) const;
 	bool idle_send_request (boost::shared_ptr<WaveViewThreadRequest>) const;
-
+	
 	static WaveViewCache* images;
 
 	static void drawing_thread ();

@@ -83,6 +83,7 @@ WaveView::WaveView (Canvas* c, boost::shared_ptr<ARDOUR::AudioRegion> region)
 	, _region_amplitude (region->scale_amplitude ())
 	, _start_shift (0.0)
 	, _region_start (region->start())
+	, get_image_in_thread (false)
 {
 	VisualPropertiesChanged.connect_same_thread (invalidation_connection, boost::bind (&WaveView::handle_visual_property_change, this));
 	ClipLevelChanged.connect_same_thread (invalidation_connection, boost::bind (&WaveView::handle_clip_level_change, this));
@@ -108,6 +109,7 @@ WaveView::WaveView (Item* parent, boost::shared_ptr<ARDOUR::AudioRegion> region)
 	, _amplitude_above_axis (1.0)
 	, _region_amplitude (region->scale_amplitude ())
 	, _region_start (region->start())
+	, get_image_in_thread (false)
 {
 	VisualPropertiesChanged.connect_same_thread (invalidation_connection, boost::bind (&WaveView::handle_visual_property_change, this));
 	ClipLevelChanged.connect_same_thread (invalidation_connection, boost::bind (&WaveView::handle_clip_level_change, this));
@@ -642,6 +644,35 @@ WaveView::draw_image (Cairo::RefPtr<Cairo::ImageSurface>& image, PeakData* _peak
 }
 
 boost::shared_ptr<WaveViewCache::Entry>
+WaveView::cache_request_result (boost::shared_ptr<WaveViewThreadRequest> req) const
+
+{
+	boost::shared_ptr<WaveViewCache::Entry> ret (new WaveViewCache::Entry (req->channel,
+	                                                                       req->height,
+	                                                                       req->region_amplitude,
+	                                                                       req->fill_color,
+	                                                                       req->samples_per_pixel,
+	                                                                       req->start,
+	                                                                       req->end,
+	                                                                       req->image));
+	if (!images) {
+		images = new WaveViewCache;
+	}
+
+	images->add (_region->audio_source (_channel), ret);
+	
+	/* consolidate cache first (removes fully-contained
+	 * duplicate images)
+	 */
+	
+	images->consolidate_image_cache (_region->audio_source (_channel),
+	                                 _channel, _height, _region_amplitude,
+	                                 _fill_color, _samples_per_pixel);
+
+	return ret;
+}
+
+boost::shared_ptr<WaveViewCache::Entry>
 WaveView::get_image (framepos_t start, framepos_t end) const
 {
 	boost::shared_ptr<WaveViewCache::Entry> ret;
@@ -668,24 +699,7 @@ WaveView::get_image (framepos_t start, framepos_t end) const
 				
 				cerr << "grabbing new image from request for " << debug_name() << endl;
 				
-				ret.reset (new WaveViewCache::Entry (current_request->channel,
-				                                     current_request->height,
-				                                     current_request->region_amplitude,
-				                                     current_request->fill_color,
-				                                     current_request->samples_per_pixel,
-				                                     current_request->start,
-				                                     current_request->end,
-				                                     current_request->image));
-				
-				images->add (_region->audio_source (_channel), ret);
-				
-				/* consolidate cache first (removes fully-contained
-				 * duplicate images)
-				 */
-				
-				images->consolidate_image_cache (_region->audio_source (_channel),
-				                                 _channel, _height, _region_amplitude,
-				                                 _fill_color, _samples_per_pixel);
+				cache_request_result (current_request);
 				
 			} else {
 				cerr << debug_name() << " ignoring stale request\n";
@@ -706,7 +720,40 @@ WaveView::get_image (framepos_t start, framepos_t end) const
 	}
 
 	if (!ret) {
-		queue_get_image (_region, start, end);
+
+		if (get_image_in_thread) {
+
+			boost::shared_ptr<WaveViewThreadRequest> req (new WaveViewThreadRequest);
+
+			req->type = WaveViewThreadRequest::Draw;
+			req->start = start;
+			req->end = end;
+			req->samples_per_pixel = _samples_per_pixel;
+			req->region = _region; /* weak ptr, to avoid storing a reference in the request queue */
+			req->channel = _channel;
+			req->width = _canvas->visible_area().width();
+			req->height = _height;
+			req->fill_color = _fill_color;
+			req->region_amplitude = _region_amplitude;
+
+			/* draw image in this (the GUI thread) */
+			
+			generate_image (req, false);
+
+			/* cache the result */
+
+			ret = cache_request_result (req);
+
+			/* reset this so that future missing images are
+			 * generated in a a worker thread.
+			 */
+			
+			get_image_in_thread = false;
+
+			
+		} else {
+			queue_get_image (_region, start, end);
+		}
 	}
 
 	return ret;
@@ -740,15 +787,11 @@ WaveView::queue_get_image (boost::shared_ptr<const ARDOUR::Region> region, frame
 	req->fill_color = _fill_color;
 	req->region_amplitude = _region_amplitude;
 
-	if (!images) {
-		images = new WaveViewCache;
-	}
-	
 	send_request (req);
 }
 
 void
-WaveView::generate_image_in_render_thread (boost::shared_ptr<WaveViewThreadRequest> req) const
+WaveView::generate_image (boost::shared_ptr<WaveViewThreadRequest> req, bool in_render_thread) const
 {
 	if (!req->should_stop()) {
 
@@ -788,8 +831,8 @@ WaveView::generate_image_in_render_thread (boost::shared_ptr<WaveViewThreadReque
 		
 		draw_image (req->image, peaks.get(), n_peaks, req);
 	}
-
-	if (!req->should_stop()) {
+	
+	if (in_render_thread && !req->should_stop()) {
 		const_cast<WaveView*>(this)->ImageReady (); /* emit signal */
 	}
 	
@@ -978,7 +1021,8 @@ WaveView::set_height (Distance height)
 
 		invalidate_image_cache ();
 		_height = height;
-
+		get_image_in_thread = true;
+		
 		_bounding_box_dirty = true;
 		end_change ();
 	}
@@ -1285,7 +1329,7 @@ WaveView::drawing_thread ()
 		request_queue_lock.unlock (); /* some RAII would be good here */
 
 		try {
-			requestor->generate_image_in_render_thread (req);
+			requestor->generate_image (req, true);
 		} catch (...) {
 			req->image.clear(); /* just in case it was set before the exception, whatever it was */
 		}
