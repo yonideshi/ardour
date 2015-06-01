@@ -56,17 +56,6 @@ bool WaveView::_global_logscaled = false;
 WaveView::Shape WaveView::_global_shape = WaveView::Normal;
 bool WaveView::_global_show_waveform_clipping = true;
 double WaveView::_clip_level = 0.98853;
-WaveViewThreadClient WaveView::global_request_object;
-
-WaveViewCache* WaveView::images = 0;
-gint WaveView::drawing_thread_should_quit = 0;
-Glib::Threads::Mutex WaveView::request_queue_lock;
-Glib::Threads::Cond WaveView::request_cond;
-Glib::Threads::Thread* WaveView::_drawing_thread = 0;
-WaveView::DrawingRequestQueue WaveView::request_queue;
-
-PBD::Signal0<void> WaveView::VisualPropertiesChanged;
-PBD::Signal0<void> WaveView::ClipLevelChanged;
 
 WaveViewCache* WaveView::images = 0;
 gint WaveView::drawing_thread_should_quit = 0;
@@ -140,12 +129,6 @@ string
 WaveView::debug_name() const
 {
 	return _region->name() + string (":") + PBD::to_string (_channel+1, std::dec);
-}
-
-void
-WaveView::image_ready ()
-{
-	redraw ();
 }
 
 void
@@ -754,7 +737,16 @@ WaveView::get_image (framepos_t start, framepos_t end) const
 			if (current_request->start <= start && current_request->end >= end) {
 				
 				cerr << "grabbing new image from request for " << debug_name() << endl;
-				
+
+				ret.reset (new WaveViewCache::Entry (current_request->channel,
+				                                     current_request->height,
+				                                     current_request->region_amplitude,
+				                                     current_request->fill_color,
+				                                     current_request->samples_per_pixel,
+				                                     current_request->start,
+				                                     current_request->end,
+				                                     current_request->image));
+	
 				cache_request_result (current_request);
 				
 			} else {
@@ -773,49 +765,6 @@ WaveView::get_image (framepos_t start, framepos_t end) const
 		ret = get_image_from_cache (start, end);
 
 	}
-
-	return false;
-}
-
-void
-WaveView::get_image (Cairo::RefPtr<Cairo::ImageSurface>& img, framepos_t start, framepos_t end, double& offset) const
-{
-	/* this is called from a ::render() call, when we need an image to
-	   draw with.
-	*/
-
-	{
-		Glib::Threads::Mutex::Lock lmq (request_queue_lock);
-
-		/* if there's a draw request outstanding, check to see if we
-		 * have an image there. if so, use it (and put it in the cache
-		 * while we're here.
-		 */
-		
-		if (current_request && !current_request->should_stop() && current_request->image) {
-
-			/* put the image into the cache so that other
-			 * WaveViews can use it if it is useful
-			 */
-
-			if (current_request->start <= start && current_request->end >= end) {
-				
-				cerr << "grabbing new image from request for " << debug_name() << endl;
-				
-				img = current_request->image;
-				offset = current_request->image_offset;
-				
-				cache_request_result (current_request);
-				
-			} else {
-				cerr << debug_name() << " ignoring stale request\n";
-			}
-
-			/* drop our handle on the current request */
-			current_request.reset ();
-		}
-	}
-
 
 	if (!ret) {
 
@@ -853,6 +802,7 @@ WaveView::get_image (Cairo::RefPtr<Cairo::ImageSurface>& img, framepos_t start, 
 		}
 	}
 
+	
 	return ret;
 }
 
@@ -1069,7 +1019,6 @@ WaveView::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) cons
 			cerr << debug_name() << " nothing to draw with\n";
 			return;
 		}
-	}
 	}
 
 	/* fix up offset: returned value is the first sample of the returned image */
@@ -1315,81 +1264,6 @@ WaveView::set_start_shift (double pixels)
 	end_visual_change ();
 }
 	
-
-void
-WaveView::cancel_my_render_request () const
-{
-	if (!images) {
-		return;
-	}
-
-	/* try to stop any current rendering of the request, or prevent it from
-	 * ever starting up.
-	 */
-	
-	if (current_request) {
-		current_request->cancel ();
-	}
-	
-	Glib::Threads::Mutex::Lock lm (request_queue_lock);
-
-	/* now remove it from the queue and reset our request pointer so that
-	   have no outstanding request (that we know about)
-	*/
-	
-	request_queue.erase (this);
-	current_request.reset ();
-}
-
-void
-WaveView::send_request (boost::shared_ptr<WaveViewThreadRequest> req) const
-{	
-	if (req->type == WaveViewThreadRequest::Draw && current_request) {
-		/* this will stop rendering in progress (which might otherwise
-		   be long lived) for any current request.
-		*/
-		current_request->cancel ();
-	}
-
-	start_drawing_thread ();
-
-	Glib::signal_idle().connect (sigc::bind (sigc::mem_fun (this, &WaveView::idle_send_request), req));
-}
-
-bool
-WaveView::idle_send_request (boost::shared_ptr<WaveViewThreadRequest> req) const
-{
-	{
-		Glib::Threads::Mutex::Lock lm (request_queue_lock);
-		/* swap requests (protected by lock) */
-		current_request = req;
-		request_queue.insert (this);
-	}
-
-	request_cond.signal (); /* wake thread */
-	
-	return false; /* do not call from idle again */
-}
-
-/*-------------------------------------------------*/
-
-void
-WaveView::start_drawing_thread ()
-{
-	if (!_drawing_thread) {
-		_drawing_thread = Glib::Threads::Thread::create (sigc::ptr_fun (WaveView::drawing_thread));
-	}
-}
-
-void
-WaveView::stop_drawing_thread ()
-{
-	if (_drawing_thread) {
-		Glib::Threads::Mutex::Lock lm (request_queue_lock);
-		g_atomic_int_set (&drawing_thread_should_quit, 1);
-		request_cond.signal ();
-	}
-}
 
 void
 WaveView::cancel_my_render_request () const
