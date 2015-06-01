@@ -99,10 +99,6 @@ WaveView::WaveView (Canvas* c, boost::shared_ptr<ARDOUR::AudioRegion> region)
 	, _region_start (region->start())
 	, get_image_in_thread (false)
 {
-	_region->DropReferences.connect (_source_invalidated_connection, MISSING_INVALIDATOR,
-						     boost::bind (&ArdourCanvas::WaveView::invalidate_source,
-								  this, boost::weak_ptr<AudioSource>(_region->audio_source())), gui_context());
-
 	VisualPropertiesChanged.connect_same_thread (invalidation_connection, boost::bind (&WaveView::handle_visual_property_change, this));
 	ClipLevelChanged.connect_same_thread (invalidation_connection, boost::bind (&WaveView::handle_clip_level_change, this));
 
@@ -129,10 +125,6 @@ WaveView::WaveView (Item* parent, boost::shared_ptr<ARDOUR::AudioRegion> region)
 	, _region_start (region->start())
 	, get_image_in_thread (false)
 {
-	_region->DropReferences.connect (_source_invalidated_connection, MISSING_INVALIDATOR,
-						     boost::bind (&ArdourCanvas::WaveView::invalidate_source,
-								  this, boost::weak_ptr<AudioSource>(_region->audio_source())), gui_context());
-
 	VisualPropertiesChanged.connect_same_thread (invalidation_connection, boost::bind (&WaveView::handle_visual_property_change, this));
 	ClipLevelChanged.connect_same_thread (invalidation_connection, boost::bind (&WaveView::handle_clip_level_change, this));
 
@@ -141,7 +133,6 @@ WaveView::WaveView (Item* parent, boost::shared_ptr<ARDOUR::AudioRegion> region)
 
 WaveView::~WaveView ()
 {
-	_source_invalidated_connection.disconnect();
 	invalidate_image_cache ();
 }
 
@@ -257,135 +248,10 @@ WaveView::set_clip_level (double dB)
 }
 
 void
-WaveView::invalidate_source (boost::weak_ptr<AudioSource> src)
-{
-	cancel_my_render_request ();
-	_current_image.reset ();
-}
-
-void
 WaveView::invalidate_image_cache ()
 {
 	cancel_my_render_request ();
-	image.clear ();
-	image_offset = 0;
-
-	Glib::Threads::Mutex::Lock lm (cache_lock);
-
-	/* XXX DO WE REALLY WANT TO CLEAR THE CACHE OF IMAGES? OTHER
-	 * REGIONS/WAVEVIEWS MAY BE USING THEM AND MAY CONTINUE TO USE THEM
-	 */
-	
-	if ((x = _image_cache.find (_region->audio_source (_channel))) == _image_cache.end ()) {
-		return;
-	}
-
-	vector <CacheEntry>& caches = _image_cache.find (_region->audio_source (_channel))->second;
-
-	for (vector<CacheEntry>::iterator c = caches.begin(); c != caches.end(); ) {
-
-		if (_channel == c->channel
-		    && _height == c->height
-		    && _region_amplitude == c->amplitude
-		    && _fill_color == c->fill_color) {
-
-			/* cached image matches current settings: get rid of it */
-			
-			c->image.clear (); // XXX is this really necessary?
-			c = caches.erase (c);
-			
-		} else {
-			++c;
-		}
-	}
-
-	if (caches.size () == 0) {
-		_image_cache.erase(_region->audio_source (_channel));
-	}
-}
-
-void
-WaveView::consolidate_image_cache () const
-{
-	list <uint32_t> deletion_list;
-	uint32_t other_entries = 0;
-	ImageCache::iterator x;
-
-	/* CALLER MUST HOLD CACHE LOCK */
-	
-	if ((x = _image_cache.find (_region->audio_source (_channel))) == _image_cache.end ()) {
-		return;
-	}
-
-	vector<CacheEntry>& caches  = x->second;
-
-	for (vector<CacheEntry>::iterator c1 = caches.begin(); c1 != caches.end(); ) {
-
-		vector<CacheEntry>::iterator nxt = c1;
-		++nxt;
-		
-		if (_channel != c1->channel
-		    || _height != c1->height
-		    || _region_amplitude != c1->amplitude
-		    || _fill_color != c1->fill_color) {
-
-			/* doesn't match current properties, ignore and move on
-			 * to the next one.
-			 */
-			
-			other_entries++;
-			c1 = nxt;
-			continue;
-		}
-
-		/* c1 now points to a cached image entry that matches current
-		 * properties. Check all subsequent cached imaged entries to
-		 * see if there are others that also match but represent
-		 * subsets of the range covered by this one.
-		 */
-
-		for (vector<CacheEntry>::iterator c2 = c1; c2 != caches.end(); ) {
-
-			vector<CacheEntry>::iterator nxt2 = c2;
-			++nxt2;
-		
-			if (c1 == c2 || _channel != c2->channel
-			    || _height != c2->height
-			    || _region_amplitude != c2->amplitude
-			    || _fill_color != c2->fill_color) {
-
-				/* properties do not match, ignore for the
-				 * purposes of consolidation.
-				 */
-				c2 = nxt2;
-				continue;
-			}
-			
-			if (c2->start >= c1->start && c2->end <= c1->end) {
-				/* c2 is fully contained by c1, so delete it */
-				c2 = caches.erase (c2);
-				continue;
-			}
-
-			c2 = nxt2;
-		}
-
-		c1 = nxt;
-	}
-
-	/* We don't care if this channel/height/amplitude/fill has anything in
-	   the cache - just drop the least-recently added entries (FIFO)
-	   until we reach a size where there is a maximum of CACHE_HIGH_WATER + other entries.
-	*/
-
-	while (caches.size() > CACHE_HIGH_WATER + other_entries) {
-		caches.front ().image.clear ();
-		caches.erase (caches.begin ());
-	}
-
-	if (caches.size () == 0) {
-		_image_cache.erase (_region->audio_source (_channel));
-	}
+	_current_image.reset ();
 }
 
 Coord
@@ -409,16 +275,19 @@ WaveView::y_extent (double s, bool /*round_to_lower_edge*/) const
 		 * up a pixel down. and a value of -1.0 (ideally y = _height-1)
 		 * currently is on the bottom separator line :(
 		 * So to make the complete waveform appear centered in
-		 * a region, we translate by +1.5 (instead of -.5)
-		 * and scale to height - 2.5 (if we scale to height - 2.0
-		 * then the bottom most pixel may bleed into the selection rect
-		 * by 0.5 px)
+		 * a region, we translate by +.5 (instead of -.5)
+		 * and waste two pixel of height: -4 (instad of -2)
 		 *
+		 * This needs fixing in canvas/rectangle the intersect
+		 * functions and probably a couple of other places as well...
 		 */
 		Coord pos;
-		pos = floor ((1.0 - s) * .5 * (_height - 2.5));
-
-		return min (_height - 2.5, (max (0.0, pos)));
+		if (s < 0) {
+			pos = ceil  ((1.0 - s) * .5 * (_height - 4.0));
+		} else {
+			pos = floor ((1.0 - s) * .5 * (_height - 4.0));
+		}
+		return min (_height - 4.0, (max (0.0, pos)));
 	}
 }
 
