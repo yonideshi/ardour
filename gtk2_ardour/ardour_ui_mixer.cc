@@ -45,8 +45,6 @@ ARDOUR_UI::create_mixer ()
 		return -1;
 	}
 
-	mixer->signal_window_state_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::main_window_state_event_handler), false));
-
 	return 0;
 }
 
@@ -62,8 +60,6 @@ ARDOUR_UI::create_meterbridge ()
 	catch (failed_constructor& err) {
 		return -1;
 	}
-
-	meterbridge->signal_window_state_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::main_window_state_event_handler), false));
 
 	return 0;
 }

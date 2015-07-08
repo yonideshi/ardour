@@ -86,7 +86,6 @@ ARDOUR_UI::create_editor ()
 	}
 
 	editor->Realized.connect (sigc::mem_fun (*this, &ARDOUR_UI::editor_realized));
-	editor->signal_window_state_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::main_window_state_event_handler), true));
 
 	return 0;
 }
@@ -729,5 +728,5 @@ ARDOUR_UI::xrun_button_release (GdkEventButton* ev)
 Gtk::Notebook&
 ARDOUR_UI::tabs()
 {
-	return editor->tabs();
+	return _tabs;
 }
