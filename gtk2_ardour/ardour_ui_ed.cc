@@ -85,6 +85,7 @@ ARDOUR_UI::create_editor ()
 		return -1;
 	}
 
+	
 	editor->Realized.connect (sigc::mem_fun (*this, &ARDOUR_UI::editor_realized));
 
 	return 0;
