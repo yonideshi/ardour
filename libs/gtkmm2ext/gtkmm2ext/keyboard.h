@@ -161,22 +161,16 @@ class LIBGTKMM2EXT_API Keyboard : public sigc::trackable, PBD::Stateful
 
 	static void keybindings_changed ();
 	static void save_keybindings ();
-	static bool load_keybindings (std::string path);
 	static void set_can_save_keybindings (bool yn);
 	static std::string current_binding_name () { return _current_binding_name; }
 	static std::map<std::string,std::string> binding_files;
 
-	int reset_bindings ();
+	static bool load_keybindings (std::string const& path);
+	static void save_keybindings (std::string const& path);
 
-	struct AccelKeyLess {
-	    bool operator() (const Gtk::AccelKey a, const Gtk::AccelKey b) const {
-		    if (a.get_key() != b.get_key()) {
-			    return a.get_key() < b.get_key();
-		    } else {
-			    return a.get_mod() < b.get_mod();
-		    }
-	    }
-	};
+	static XMLNode const * bindings_node() { return _bindings_node; }
+	
+	int reset_bindings ();
 
 	sigc::signal0<void> ZoomVerticalModifierReleased;
 
@@ -200,10 +194,9 @@ class LIBGTKMM2EXT_API Keyboard : public sigc::trackable, PBD::Stateful
 	static bool can_save_keybindings;
 	static bool bindings_changed_after_save_became_legal;
 	static std::string _current_binding_name;
+	static XMLNode* _bindings_node;
 
 	typedef std::pair<std::string,std::string> two_strings;
-
-	static std::map<Gtk::AccelKey,two_strings,AccelKeyLess> release_keys;
 
 	static gint _snooper (GtkWidget*, GdkEventKey*, gpointer);
 	gint snooper (GtkWidget*, GdkEventKey*);
@@ -211,6 +204,9 @@ class LIBGTKMM2EXT_API Keyboard : public sigc::trackable, PBD::Stateful
 	static void set_modifier (uint32_t newval, uint32_t& variable);
 
 	static bool _some_magic_widget_has_focus;
+
+	static int read_keybindings (std::string const& path);
+	static int store_keybindings (std::string const& path);
 };
 
 } /* namespace */
