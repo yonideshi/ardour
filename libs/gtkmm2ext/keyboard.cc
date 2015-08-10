@@ -111,7 +111,6 @@ bool Keyboard::can_save_keybindings = false;
 bool Keyboard::bindings_changed_after_save_became_legal = false;
 map<string,string> Keyboard::binding_files;
 string Keyboard::_current_binding_name;
-PBD::Signal0<void> Keyboard::BindingsChanged;
 
 /* set this to initially contain the modifiers we care about, then track changes in ::set_edit_modifier() etc. */
 
@@ -533,7 +532,6 @@ Keyboard::keybindings_changed ()
 	}
 
 	Keyboard::save_keybindings ();
-	BindingsChanged (); /* EMIT SIGNAL */
 }
 
 void
