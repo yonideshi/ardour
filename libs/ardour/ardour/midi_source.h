@@ -60,8 +60,8 @@ class LIBARDOUR_API MidiSource : virtual public Source, public boost::enable_sha
 	 */
 	int write_to (const Lock&                   lock,
 	              boost::shared_ptr<MidiSource> newsrc,
-	              Evoral::Beats                 begin = Evoral::MinBeats,
-	              Evoral::Beats                 end   = Evoral::MaxBeats);
+	              Evoral::Beats                 begin = Evoral::Beats(),
+	              Evoral::Beats                 end   = std::numeric_limits<Evoral::Beats>::max());
 
 	/** Read the data in a given time range from the MIDI source.
 	 * All time stamps in parameters are in audio frames (even if the source has tempo time).

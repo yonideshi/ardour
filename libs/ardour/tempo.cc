@@ -2016,16 +2016,23 @@ TempoMap::framepos_plus_beats (framepos_t pos, Evoral::Beats beats) const
 		/* Distance to the end of this section in frames */
 		framecnt_t distance_frames = (next_tempo == metrics.end() ? max_framepos : ((*next_tempo)->frame() - pos));
 
-		/* Distance to the end in beats */
+		/* Distance to the end of this section in beats */
 		Evoral::Beats distance_beats = Evoral::Beats::ticks_at_rate(
 			distance_frames, tempo->frames_per_beat (_frame_rate));
 
-		/* Amount to subtract this time */
-		Evoral::Beats const delta = min (distance_beats, beats);
+		/* Remaining beat duration to add in frames.  Use this to check if
+		   we've reached the end rather than distance_beats to avoid overflow
+		   when distance_frames is huge. */
+		const int64_t beats_frames = beats.to_ticks(_frame_rate);
 
-		DEBUG_TRACE (DEBUG::TempoMath, string_compose ("\tdistance to %1 = %2 (%3 beats)\n",
-							       (next_tempo == metrics.end() ? max_framepos : (*next_tempo)->frame()),
-							       distance_frames, distance_beats));
+		/* Amount to subtract this time */
+		Evoral::Beats const delta = (beats_frames < distance_frames) ? beats : distance_beats;
+
+		DEBUG_TRACE (DEBUG::TempoMath,
+		             string_compose ("\tdistance to %1 = %2 (%3 beats, delta %4 beats, %5 frames)\n",
+		                             (next_tempo == metrics.end() ? max_framepos : (*next_tempo)->frame()),
+		                             distance_frames, distance_beats,
+		                             delta, delta.to_ticks(tempo->frames_per_beat (_frame_rate))));
 
 		/* Update */
 		beats -= delta;
