@@ -823,6 +823,8 @@ class ARDOUR_UI : public Gtkmm2ext::UI, public ARDOUR::SessionHandlePtr
 	DuplicateRouteDialog* duplicate_routes_dialog;
 
 	void tabs_switch (GtkNotebookPage*, guint page_number);
+	void tabs_page_added (Gtk::Widget*, guint);
+	void tabs_page_removed (Gtk::Widget*, guint);
 	ArdourButton editor_visibility_button;
 	ArdourButton mixer_visibility_button;
 	ArdourButton prefs_visibility_button;
