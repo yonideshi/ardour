@@ -26,6 +26,7 @@
 #include "ardour/playlist.h"
 #include "ardour/port.h"
 #include "ardour/processor.h"
+#include "ardour/replay.h"
 #include "ardour/route_group_specialized.h"
 #include "ardour/session.h"
 #include "ardour/session_playlists.h"
@@ -557,7 +558,7 @@ Track::no_roll (pframes_t nframes, framepos_t start_frame, framepos_t end_frame,
 }
 
 int
-Track::silent_roll (pframes_t nframes, framepos_t /*start_frame*/, framepos_t /*end_frame*/, bool& need_butler)
+Track::silent_roll (pframes_t nframes, framepos_t start_frame, framepos_t end_frame, bool& need_butler)
 {
 	Glib::Threads::RWLock::ReaderLock lm (_processor_lock, Glib::Threads::TRY_LOCK);
 	if (!lm.locked()) {
@@ -580,14 +581,16 @@ Track::silent_roll (pframes_t nframes, framepos_t /*start_frame*/, framepos_t /*
 	_silent = true;
 	_amp->apply_gain_automation(false);
 
-	silence (nframes);
+	need_butler = false;
+	Route::silent_roll (nframes, start_frame, end_frame, need_butler);
 
 	framecnt_t playback_distance;
 
 	BufferSet& bufs (_session.get_route_buffers (n_process_buffers(), true));
 
 	int const dret = _diskstream->process (bufs, _session.transport_frame(), nframes, playback_distance, false);
-	need_butler = _diskstream->commit (playback_distance);
+	need_butler |= _diskstream->commit (playback_distance);
+
 	return dret;
 }
 
@@ -697,6 +700,15 @@ Track::capture_buffer_load () const
 int
 Track::do_refill ()
 {
+	{
+		Glib::Threads::RWLock::ReaderLock lm (_processor_lock);
+		for (ProcessorList::iterator i = _processors.begin(); i != _processors.end(); ++i) {
+			boost::shared_ptr<Replay> rpl = boost::dynamic_pointer_cast<Replay> (*i);
+			if (rpl) {
+				rpl->do_refill ();
+			}
+		}
+	}
 	return _diskstream->do_refill ();
 }
 
@@ -715,6 +727,15 @@ Track::set_pending_overwrite (bool o)
 int
 Track::seek (framepos_t p, bool complete_refill)
 {
+	{
+		Glib::Threads::RWLock::ReaderLock lm (_processor_lock);
+		for (ProcessorList::iterator i = _processors.begin(); i != _processors.end(); ++i) {
+			boost::shared_ptr<Replay> rpl = boost::dynamic_pointer_cast<Replay> (*i);
+			if (rpl) {
+				rpl->seek (p, complete_refill);
+			}
+		}
+	}
 	return _diskstream->seek (p, complete_refill);
 }
 
@@ -733,6 +754,17 @@ Track::can_internal_playback_seek (framecnt_t p)
 int
 Track::internal_playback_seek (framecnt_t p)
 {
+	{
+		// XXX is this needed?
+		// could be done implicitly (start_frame, end_frame)
+		Glib::Threads::RWLock::ReaderLock lm (_processor_lock);
+		for (ProcessorList::iterator i = _processors.begin(); i != _processors.end(); ++i) {
+			boost::shared_ptr<Replay> rpl = boost::dynamic_pointer_cast<Replay> (*i);
+			if (rpl) {
+				rpl->internal_playback_seek (p);
+			}
+		}
+	}
 	return _diskstream->internal_playback_seek (p);
 }
 
@@ -752,12 +784,21 @@ Track::non_realtime_locate (framepos_t p)
 		   for hidden (secret) tracks
 		*/
 		_diskstream->non_realtime_locate (p);
+
+		Glib::Threads::RWLock::ReaderLock lm (_processor_lock);
+		for (ProcessorList::iterator i = _processors.begin(); i != _processors.end(); ++i) {
+			boost::shared_ptr<Replay> rpl = boost::dynamic_pointer_cast<Replay> (*i);
+			if (rpl) {
+				rpl->seek (p /* * speed() */, true);
+			}
+		}
 	}
 }
 
 void
 Track::non_realtime_set_speed ()
 {
+	// TODO Replay set_speed
 	_diskstream->non_realtime_set_speed ();
 }
 

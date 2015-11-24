@@ -165,6 +165,7 @@ libardour_sources = [
         'region_factory.cc',
         'resampled_source.cc',
         'region.cc',
+        'replay.cc',
         'return.cc',
         'reverse.cc',
         'route.cc',

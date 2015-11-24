@@ -38,6 +38,7 @@
 #include "ardour/profile.h"
 #include "ardour/region.h"
 #include "ardour/region_factory.h"
+#include "ardour/replay.h"
 #include "ardour/session.h"
 #include "ardour/session_playlists.h"
 #include "ardour/source.h"
@@ -360,6 +361,14 @@ AudioTrack::roll (pframes_t nframes, framepos_t start_frame, framepos_t end_fram
 	int dret;
 	framecnt_t playback_distance;
 
+	need_butler = false;
+	for (ProcessorList::iterator i = _processors.begin(); i != _processors.end(); ++i) {
+		boost::shared_ptr<Replay> rpl = boost::dynamic_pointer_cast<Replay> (*i);
+		if (rpl) {
+			need_butler |= rpl->need_butler ();
+		}
+	}
+
 	if ((nframes = check_initial_delay (nframes, transport_frame)) == 0) {
 
 		/* need to do this so that the diskstream sets its
@@ -370,7 +379,8 @@ AudioTrack::roll (pframes_t nframes, framepos_t start_frame, framepos_t end_fram
 		BufferSet bufs; /* empty set, no matter - nothing will happen */
 
 		dret = diskstream->process (bufs, transport_frame, 0, playback_distance, false);
-		need_butler = diskstream->commit (playback_distance);
+		// Replay commit
+		need_butler |= diskstream->commit (playback_distance);
 		return dret;
 	}
 
@@ -396,7 +406,7 @@ AudioTrack::roll (pframes_t nframes, framepos_t start_frame, framepos_t end_fram
 	}
 
 	if ((dret = diskstream->process (bufs, transport_frame, nframes, playback_distance, (monitoring_state() == MonitoringDisk))) != 0) {
-		need_butler = diskstream->commit (playback_distance);
+		need_butler |= diskstream->commit (playback_distance);
 		silence (nframes);
 		return dret;
 	}
@@ -410,7 +420,7 @@ AudioTrack::roll (pframes_t nframes, framepos_t start_frame, framepos_t end_fram
 		}
 	}
 
-	need_butler = diskstream->commit (playback_distance);
+	need_butler |= diskstream->commit (playback_distance);
 
 	return 0;
 }

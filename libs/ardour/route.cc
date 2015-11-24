@@ -61,6 +61,7 @@
 #include "ardour/port_insert.h"
 #include "ardour/processor.h"
 #include "ardour/profile.h"
+#include "ardour/replay.h"
 #include "ardour/route.h"
 #include "ardour/route_group.h"
 #include "ardour/send.h"
@@ -2183,7 +2184,7 @@ Route::apply_processor_order (const ProcessorList& new_order)
 int
 Route::reorder_processors (const ProcessorList& new_order, ProcessorStreams* err)
 {
-	// it a change is already queued, wait for it
+	// if a change is already queued, wait for it
 	// (unless engine is stopped. apply immediately and proceed
 	while (g_atomic_int_get (&_pending_process_reorder)) {
 		if (!AudioEngine::instance()->running()) {
@@ -3547,8 +3548,14 @@ Route::roll (pframes_t nframes, framepos_t start_frame, framepos_t end_frame, in
 }
 
 int
-Route::silent_roll (pframes_t nframes, framepos_t /*start_frame*/, framepos_t /*end_frame*/, bool& /* need_butler */)
+Route::silent_roll (pframes_t nframes, framepos_t /*start_frame*/, framepos_t /*end_frame*/, bool& need_butler)
 {
+	for (ProcessorList::iterator i = _processors.begin(); i != _processors.end(); ++i) {
+		boost::shared_ptr<Replay> rpl = boost::dynamic_pointer_cast<Replay> (*i);
+		if (rpl) {
+			need_butler = rpl->need_butler ();
+		}
+	}
 	silence (nframes);
 	return 0;
 }
