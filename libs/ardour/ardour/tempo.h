@@ -93,9 +93,9 @@ class LIBARDOUR_API Meter {
 class LIBARDOUR_API MetricSection {
   public:
 	MetricSection (const Timecode::BBT_Time& start)
-		: _start (start), _frame (0), _movable (true) {}
+		: _start (start), _frame (0), _movable (true), _position_lock_style (MusicTime) {}
 	MetricSection (framepos_t start)
-		: _frame (start), _movable (true) {}
+		: _frame (start), _movable (true), _position_lock_style (MusicTime) {}
 
 	virtual ~MetricSection() {}
 
@@ -118,12 +118,15 @@ class LIBARDOUR_API MetricSection {
 	   XML state information.
 	*/
 	virtual XMLNode& get_state() const = 0;
+	PositionLockStyle position_lock_style () const { return _position_lock_style; }
+	void set_position_lock_style (PositionLockStyle ps) { _position_lock_style = ps; }
 
-  private:
+private:
 
 	Timecode::BBT_Time _start;
 	framepos_t         _frame;
 	bool               _movable;
+	PositionLockStyle  _position_lock_style;
 };
 
 /** A section of timeline with a certain Meter. */
@@ -377,8 +380,10 @@ class LIBARDOUR_API TempoMap : public PBD::StatefulDestructible
 	int n_meters () const;
 
 	framecnt_t frame_rate () const { return _frame_rate; }
+
 	PBD::Signal0<void> MetricPositionChanged;
-  private:
+
+private:
 
 	friend class ::BBTTest;
 	friend class ::FrameposPlusBeatsTest;
