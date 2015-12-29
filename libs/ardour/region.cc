@@ -549,7 +549,7 @@ Region::set_position_lock_style (PositionLockStyle ps)
 		_position_lock_style = ps;
 
 		if (_position_lock_style == MusicTime) {
-			_session.bbt_time (_position, _bbt_time);
+			_beat = _session.tempo_map().beat_at_frame (_position);
 		}
 
 		send_change (Properties::position_lock_style);
@@ -564,9 +564,8 @@ Region::update_after_tempo_map_change ()
 	if (!pl || _position_lock_style != MusicTime) {
 		return;
 	}
-
 	TempoMap& map (_session.tempo_map());
-	framepos_t pos = map.frame_time (_bbt_time);
+	framepos_t pos = map.frame_at_beat (_beat);
 	set_position_internal (pos, false);
 
 	/* do this even if the position is the same. this helps out
@@ -664,7 +663,7 @@ void
 Region::recompute_position_from_lock_style ()
 {
 	if (_position_lock_style == MusicTime) {
-		_session.bbt_time (_position, _bbt_time);
+		_beat = _session.tempo_map().beat_at_frame (_position);
 	}
 }
 
@@ -1217,8 +1216,8 @@ Region::state ()
 
 	if (_position_lock_style != AudioTime) {
 		stringstream str;
-		str << _bbt_time;
-		node->add_property ("bbt-position", str.str());
+		str << _beat;
+		node->add_property ("beat", str.str());
 	}
 
 	for (uint32_t n=0; n < _sources.size(); ++n) {
@@ -1279,7 +1278,7 @@ int
 Region::_set_state (const XMLNode& node, int /*version*/, PropertyChange& what_changed, bool send)
 {
 	const XMLProperty* prop;
-
+	Timecode::BBT_Time bbt_time;
 	Stateful::save_extra_xml (node);
 
 	what_changed = set_values (node);
@@ -1292,9 +1291,21 @@ Region::_set_state (const XMLNode& node, int /*version*/, PropertyChange& what_c
 			_position_lock_style = AudioTime;
 		} else {
 			if (sscanf (prop->value().c_str(), "%d|%d|%d",
-				    &_bbt_time.bars,
-				    &_bbt_time.beats,
-				    &_bbt_time.ticks) != 3) {
+				    &bbt_time.bars,
+				    &bbt_time.beats,
+				    &bbt_time.ticks) != 3) {
+				_position_lock_style = AudioTime;
+			}
+			_beat = _session.tempo_map().bbt_to_beats (bbt_time);
+		}
+	}
+
+	if (_position_lock_style == MusicTime) {
+		if ((prop = node.property ("beat")) == 0) {
+			/* missing BBT info, revert to audio time locking */
+			_position_lock_style = AudioTime;
+		} else {
+			if (sscanf (prop->value().c_str(), "%lf", &_beat) != 1) {
 				_position_lock_style = AudioTime;
 			}
 		}
