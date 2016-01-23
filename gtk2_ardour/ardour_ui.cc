@@ -247,6 +247,7 @@ ARDOUR_UI::ARDOUR_UI (int *argcp, char **argvp[], const char* localedir)
 	, ignore_dual_punch (false)
 	, editor (0)
 	, mixer (0)
+	, masters (0)
 	, nsm (0)
 	, _was_dirty (false)
 	, _mixer_on_top (false)
@@ -303,6 +304,7 @@ ARDOUR_UI::ARDOUR_UI (int *argcp, char **argvp[], const char* localedir)
 	, editor_visibility_button (S_("Window|Editor"))
 	, mixer_visibility_button (S_("Window|Mixer"))
 	, prefs_visibility_button (S_("Window|Preferences"))
+	, masters_visibility_button (S_("Windows|Masters"))
 {
 	Gtkmm2ext::init (localedir);
 
