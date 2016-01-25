@@ -46,7 +46,6 @@
 #include "public_editor.h"
 #include "audio_clock.h"
 #include "keyboard.h"
-#include "master_faders.h"
 #include "monitor_section.h"
 #include "engine_dialog.h"
 #include "editor.h"
@@ -226,22 +225,18 @@ ARDOUR_UI::install_actions ()
 	global_actions.register_action (common_actions, X_("show-mixer"), _("Show"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::show_tabbable), mixer));
 	global_actions.register_action (common_actions, X_("show-preferences"), _("Show"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::show_tabbable), rc_option_editor));
 	global_actions.register_action (common_actions, X_("menu-show-preferences"), _("Preferences"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::show_tabbable), rc_option_editor));
-	global_actions.register_action (common_actions, X_("show-masters"), _("Show"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::show_tabbable), masters));
 
 	global_actions.register_action (common_actions, X_("hide-editor"), _("Hide"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::hide_tabbable), editor));
 	global_actions.register_action (common_actions, X_("hide-mixer"), _("Hide"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::hide_tabbable), mixer));
 	global_actions.register_action (common_actions, X_("hide-preferences"), _("Hide"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::hide_tabbable), rc_option_editor));
-	global_actions.register_action (common_actions, X_("hide-masters"), _("Hide"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::hide_tabbable), masters));
 
 	global_actions.register_action (common_actions, X_("attach-editor"), _("Attach"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::attach_tabbable), editor));
 	global_actions.register_action (common_actions, X_("attach-mixer"), _("Attach"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::attach_tabbable), mixer));
 	global_actions.register_action (common_actions, X_("attach-preferences"), _("Attach"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::attach_tabbable), rc_option_editor));
-	global_actions.register_action (common_actions, X_("attach-masters"), _("Attach"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::attach_tabbable), masters));
 
 	global_actions.register_action (common_actions, X_("detach-editor"), _("Detach"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::detach_tabbable), editor));
 	global_actions.register_action (common_actions, X_("detach-mixer"), _("Detach"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::detach_tabbable), mixer));
 	global_actions.register_action (common_actions, X_("detach-preferences"), _("Detach"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::detach_tabbable), rc_option_editor));
-	global_actions.register_action (common_actions, X_("detach-masters"), _("Detach"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::detach_tabbable), masters));
 
 	/* These "change" actions are not intended to be used inside menus, but
 	   are for the tab/window control buttons, which have somewhat odd
@@ -250,7 +245,6 @@ ARDOUR_UI::install_actions ()
 	global_actions.register_action (common_actions, X_("change-editor-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::button_change_tabbable_visibility), editor));
 	global_actions.register_action (common_actions, X_("change-mixer-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::button_change_tabbable_visibility), mixer));
 	global_actions.register_action (common_actions, X_("change-preferences-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::button_change_tabbable_visibility), rc_option_editor));
-	global_actions.register_action (common_actions, X_("change-masters-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::button_change_tabbable_visibility), masters));
 
 	/* These "change" actions are not intended to be used inside menus, but
 	   are for the tab/window control key bindings, which have somewhat odd
@@ -259,7 +253,6 @@ ARDOUR_UI::install_actions ()
 	global_actions.register_action (common_actions, X_("key-change-editor-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::key_change_tabbable_visibility), editor));
 	global_actions.register_action (common_actions, X_("key-change-mixer-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::key_change_tabbable_visibility), mixer));
 	global_actions.register_action (common_actions, X_("key-change-preferences-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::key_change_tabbable_visibility), rc_option_editor));
-	global_actions.register_action (common_actions, X_("key-change-masters-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::key_change_tabbable_visibility), masters));
 
 	global_actions.register_action (common_actions, X_("toggle-editor-and-mixer"), _("Toggle Editor & Mixer"), sigc::mem_fun (*this, &ARDOUR_UI::toggle_editor_and_mixer));
 
@@ -584,14 +577,12 @@ ARDOUR_UI::build_menu_bar ()
 	editor_visibility_button.signal_drag_failed().connect (sigc::bind (sigc::ptr_fun (drag_failed), editor));
 	mixer_visibility_button.signal_drag_failed().connect (sigc::bind (sigc::ptr_fun (drag_failed), mixer));
 	prefs_visibility_button.signal_drag_failed().connect (sigc::bind (sigc::ptr_fun (drag_failed), rc_option_editor));
-	masters_visibility_button.signal_drag_failed().connect (sigc::bind (sigc::ptr_fun (drag_failed), masters));
 
 	/* catch context clicks so that we can show a menu on these buttons */
 
 	editor_visibility_button.signal_button_press_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_visibility_button_press), X_("editor")), false);
 	mixer_visibility_button.signal_button_press_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_visibility_button_press), X_("mixer")), false);
 	prefs_visibility_button.signal_button_press_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_visibility_button_press), X_("preferences")), false);
-	masters_visibility_button.signal_button_press_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_visibility_button_press), X_("masters")), false);
 
 	editor_visibility_button.set_related_action (ActionManager::get_action (X_("Common"), X_("change-editor-visibility")));
 	editor_visibility_button.set_name (X_("page switch button"));
@@ -599,8 +590,6 @@ ARDOUR_UI::build_menu_bar ()
 	mixer_visibility_button.set_name (X_("page switch button"));
 	prefs_visibility_button.set_related_action (ActionManager::get_action (X_("Common"), X_("change-preferences-visibility")));
 	prefs_visibility_button.set_name (X_("page switch button"));
-	masters_visibility_button.set_related_action (ActionManager::get_action (X_("Common"), X_("change-masters-visibility")));
-	masters_visibility_button.set_name (X_("page switch button"));
 
 	Gtkmm2ext::UI::instance()->set_tip (editor_visibility_button,
 	                                    string_compose (_("Drag this tab to the desktop to show %1 in its own window\n\n"
@@ -614,14 +603,9 @@ ARDOUR_UI::build_menu_bar ()
 	                                    string_compose (_("Drag this tab to the desktop to show %1 in its own window\n\n"
 	                                                      "To put the window back, use the Window > %1 > Attach menu action"), rc_option_editor->name()));
 
-	Gtkmm2ext::UI::instance()->set_tip (prefs_visibility_button,
-	                                    string_compose (_("Drag this tab to the desktop to show %1 in its own window\n\n"
-	                                                      "To put the window back, use the Window > %1 > Attach menu action"), masters->name()));
-
 	window_button_box->pack_start (editor_visibility_button, false, false);
 	window_button_box->pack_start (mixer_visibility_button, false, false);
 	window_button_box->pack_start (prefs_visibility_button, false, false);
-	window_button_box->pack_start (masters_visibility_button, false, false);
 
 	menu_hbox.pack_start (*window_button_box, false, false, 20);
 
@@ -740,8 +724,6 @@ ARDOUR_UI::save_ardour_state ()
 		current_tab = "mixer";
 	} else if (rc_option_editor && (current_page_number == _tabs.page_num (rc_option_editor->contents()))) {
 		current_tab == "preferences";
-	} else if (masters && (current_page_number == _tabs.page_num (masters->contents()))) {
-		current_tab == "masters";
 	}
 
 	main_window_node.add_property (X_("current-tab"), current_tab);

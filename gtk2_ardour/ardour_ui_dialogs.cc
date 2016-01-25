@@ -50,7 +50,6 @@
 #include "keyeditor.h"
 #include "location_ui.h"
 #include "main_clock.h"
-#include "master_faders.h"
 #include "meterbridge.h"
 #include "meter_patterns.h"
 #include "midi_tracer.h"
@@ -465,7 +464,6 @@ ARDOUR_UI::tabs_page_added (Widget*,guint)
 		editor_visibility_button.drag_source_set (drag_target_entries);
 		mixer_visibility_button.drag_source_set (drag_target_entries);
 		prefs_visibility_button.drag_source_set (drag_target_entries);
-		masters_visibility_button.drag_source_set (drag_target_entries);
 
 		editor_visibility_button.drag_source_set_icon (Gtkmm2ext::pixbuf_from_string (editor->name(),
 		                                                                              Pango::FontDescription ("Sans 24"),
@@ -479,10 +477,6 @@ ARDOUR_UI::tabs_page_added (Widget*,guint)
 		                                                                             Pango::FontDescription ("Sans 24"),
 		                                                                             0, 0,
 		                                                                             Gdk::Color ("red")));
-		masters_visibility_button.drag_source_set_icon (Gtkmm2ext::pixbuf_from_string (masters->name(),
-			Pango::FontDescription ("Sans 24"),
-			0, 0,
-			Gdk::Color ("red")));
 	}
 }
 
@@ -493,7 +487,6 @@ ARDOUR_UI::tabs_page_removed (Widget*, guint)
 		editor_visibility_button.drag_source_unset ();
 		mixer_visibility_button.drag_source_unset ();
 		prefs_visibility_button.drag_source_unset ();
-		masters_visibility_button.drag_source_unset ();
 	}
 }
 
@@ -512,10 +505,6 @@ ARDOUR_UI::tabs_switch (GtkNotebookPage*, guint page)
 			prefs_visibility_button.set_active_state (Gtkmm2ext::Off);
 		}
 
-		if (masters && (masters->tabbed() || masters->tabbed_by_default())) {
-			masters_visibility_button.set_active_state (Gtkmm2ext::Off);
-		}
-
 	} else if (page == (guint) _tabs.page_num (mixer->contents())) {
 
 		if (editor && (editor->tabbed() || editor->tabbed_by_default())) {
@@ -526,10 +515,6 @@ ARDOUR_UI::tabs_switch (GtkNotebookPage*, guint page)
 
 		if (rc_option_editor && (rc_option_editor->tabbed() || rc_option_editor->tabbed_by_default())) {
 			prefs_visibility_button.set_active_state (Gtkmm2ext::Off);
-		}
-
-		if (masters && (masters->tabbed() || masters->tabbed_by_default())) {
-			masters_visibility_button.set_active_state (Gtkmm2ext::Off);
 		}
 
 	} else if (page == (guint) _tabs.page_num (rc_option_editor->contents())) {
@@ -543,26 +528,6 @@ ARDOUR_UI::tabs_switch (GtkNotebookPage*, guint page)
 		}
 
 		prefs_visibility_button.set_active_state (Gtkmm2ext::ImplicitActive);
-
-		if (masters && (masters->tabbed() || masters->tabbed_by_default())) {
-			masters_visibility_button.set_active_state (Gtkmm2ext::Off);
-		}
-
-	} else if (page == (guint) _tabs.page_num (masters->contents())) {
-
-		if (editor && (editor->tabbed() || editor->tabbed_by_default())) {
-			editor_visibility_button.set_active_state (Gtkmm2ext::Off);
-		}
-
-		if (mixer && (mixer->tabbed() || mixer->tabbed_by_default())) {
-			mixer_visibility_button.set_active_state (Gtkmm2ext::Off);
-		}
-
-		if (rc_option_editor && (rc_option_editor->tabbed() || rc_option_editor->tabbed_by_default())) {
-			prefs_visibility_button.set_active_state (Gtkmm2ext::Off);
-		}
-
-		masters_visibility_button.set_active_state (Gtkmm2ext::ImplicitActive);
 	}
 
 }
@@ -651,22 +616,14 @@ ARDOUR_UI::tabbable_state_change (Tabbable& t)
 		vis_button = &editor_visibility_button;
 		other_vis_buttons.push_back (&mixer_visibility_button);
 		other_vis_buttons.push_back (&prefs_visibility_button);
-		other_vis_buttons.push_back (&masters_visibility_button);
 	} else if (&t == mixer) {
 		vis_button = &mixer_visibility_button;
 		other_vis_buttons.push_back (&editor_visibility_button);
 		other_vis_buttons.push_back (&prefs_visibility_button);
-		other_vis_buttons.push_back (&masters_visibility_button);
 	} else if (&t == rc_option_editor) {
 		vis_button = &prefs_visibility_button;
 		other_vis_buttons.push_back (&editor_visibility_button);
-		other_vis_buttons.push_back (&masters_visibility_button);
 		other_vis_buttons.push_back (&mixer_visibility_button);
-	} else if (&t == masters) {
-		vis_button = &masters_visibility_button;
-		other_vis_buttons.push_back (&editor_visibility_button);
-		other_vis_buttons.push_back (&mixer_visibility_button);
-		other_vis_buttons.push_back (&prefs_visibility_button);
 	}
 
 	if (!vis_button) {

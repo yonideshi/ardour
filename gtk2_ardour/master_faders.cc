@@ -28,7 +28,6 @@
 
 #include "ardour_ui.h"
 #include "gui_thread.h"
-#include "master_faders.h"
 #include "vca_master_strip.h"
 
 #include "i18n.h"

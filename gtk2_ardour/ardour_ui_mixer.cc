@@ -25,7 +25,6 @@
 
 #include "actions.h"
 #include "ardour_ui.h"
-#include "master_faders.h"
 #include "mixer_ui.h"
 #include "meterbridge.h"
 
@@ -66,16 +65,3 @@ ARDOUR_UI::create_meterbridge ()
 	return 0;
 }
 
-int
-ARDOUR_UI::create_masters ()
-{
-	try {
-		masters = MasterFaders::instance ();
-	}
-
-	catch (failed_constructor& err) {
-		return -1;
-	}
-
-	return 0;
-}
