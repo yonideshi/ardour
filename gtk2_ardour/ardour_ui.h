@@ -118,7 +118,6 @@ class ButtonJoiner;
 class ConnectionEditor;
 class DuplicateRouteDialog;
 class MainClock;
-class MasterFaders;
 class Mixer_UI;
 class ArdourPrompter;
 class PublicEditor;
@@ -204,7 +203,6 @@ class ARDOUR_UI : public Gtkmm2ext::UI, public ARDOUR::SessionHandlePtr
 
 	PublicEditor&	  the_editor() { return *editor;}
 	Mixer_UI* the_mixer() { return mixer; }
-	MasterFaders* the_masters() { return masters; }
 
 	void new_midi_tracer_window ();
 	void toggle_editing_space();
@@ -375,7 +373,6 @@ class ARDOUR_UI : public Gtkmm2ext::UI, public ARDOUR::SessionHandlePtr
 	Gtk::Notebook _tabs;
 	PublicEditor*  editor;
 	Mixer_UI*      mixer;
-	MasterFaders*  masters;
 	Gtk::Tooltips _tooltips;
 	NSM_Client*    nsm;
 	bool          _was_dirty;
@@ -849,7 +846,6 @@ class ARDOUR_UI : public Gtkmm2ext::UI, public ARDOUR::SessionHandlePtr
 	ArdourButton editor_visibility_button;
 	ArdourButton mixer_visibility_button;
 	ArdourButton prefs_visibility_button;
-	ArdourButton masters_visibility_button;
 
 	bool key_press_focus_accelerator_handler (Gtk::Window& window, GdkEventKey* ev, Gtkmm2ext::Bindings*);
 	bool try_gtk_accel_binding (GtkWindow* win, GdkEventKey* ev, bool translate, GdkModifierType modifier);
