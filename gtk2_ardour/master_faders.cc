@@ -25,8 +25,9 @@
 #include "gtkmm2ext/window_title.h"
 
 #include "ardour_ui.h"
-#include "master_faders.h"
 #include "gui_thread.h"
+#include "master_faders.h"
+#include "vca_master_strip.h"
 
 #include "i18n.h"
 
@@ -180,6 +181,12 @@ MasterFaders::set_session (Session* sess)
 	}
 
 	// start_updating ();
+
+	/* FAKE CONTENT */
+
+	VCAMasterStrip* vms = new VCAMasterStrip (_session);
+	strip_packer.pack_start (*vms, false, false);
+	vms->show ();
 }
 
 XMLNode&
