@@ -250,7 +250,7 @@ ARDOUR_UI::install_actions ()
 	global_actions.register_action (common_actions, X_("change-editor-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::button_change_tabbable_visibility), editor));
 	global_actions.register_action (common_actions, X_("change-mixer-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::button_change_tabbable_visibility), mixer));
 	global_actions.register_action (common_actions, X_("change-preferences-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::button_change_tabbable_visibility), rc_option_editor));
-	global_actions.register_action (common_actions, X_("change-masters"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::button_change_tabbable_visibility), masters));
+	global_actions.register_action (common_actions, X_("change-masters-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::button_change_tabbable_visibility), masters));
 
 	/* These "change" actions are not intended to be used inside menus, but
 	   are for the tab/window control key bindings, which have somewhat odd
@@ -599,7 +599,7 @@ ARDOUR_UI::build_menu_bar ()
 	mixer_visibility_button.set_name (X_("page switch button"));
 	prefs_visibility_button.set_related_action (ActionManager::get_action (X_("Common"), X_("change-preferences-visibility")));
 	prefs_visibility_button.set_name (X_("page switch button"));
-	masters_visibility_button.set_related_action (ActionManager::get_action (X_("Common"), X_("change-preferences-visibility")));
+	masters_visibility_button.set_related_action (ActionManager::get_action (X_("Common"), X_("change-masters-visibility")));
 	masters_visibility_button.set_name (X_("page switch button"));
 
 	Gtkmm2ext::UI::instance()->set_tip (editor_visibility_button,
