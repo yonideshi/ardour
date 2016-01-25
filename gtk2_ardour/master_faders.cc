@@ -17,6 +17,8 @@
 
 */
 
+#include "ardour/vca.h"
+
 #include <gtkmm/action.h>
 #include <gtkmm/actiongroup.h>
 #include <gtkmm/window.h>
@@ -184,7 +186,8 @@ MasterFaders::set_session (Session* sess)
 
 	/* FAKE CONTENT */
 
-	VCAMasterStrip* vms = new VCAMasterStrip (_session);
+	boost::shared_ptr<VCA> vca (new VCA (*_session, "a vca"));
+	VCAMasterStrip* vms = new VCAMasterStrip (_session, vca);
 	strip_packer.pack_start (*vms, false, false);
 	vms->show ();
 }
