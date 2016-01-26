@@ -3924,6 +3924,9 @@ ARDOUR_UI::add_route (Gtk::Window* /* ignored */)
 	case AddRouteDialog::AudioBus:
 		session_add_audio_bus (input_chan.n_audio(), output_chan.n_audio(), route_group, count, name_template);
 		break;
+	case AddRouteDialog::VCAMaster:
+		/* do something */
+		break;
 	}
 }
 
