@@ -138,6 +138,7 @@ class Source;
 class Speakers;
 class TempoMap;
 class Track;
+class VCAManager;
 class WindowsVSTPlugin;
 
 extern void setup_enum_writer ();
@@ -306,7 +307,7 @@ class LIBARDOUR_API Session : public PBD::StatefulDestructible, public PBD::Scop
 	void maybe_enable_record ();
 	void disable_record (bool rt_context, bool force = false);
 	void step_back_from_record ();
-	
+
 	void set_all_tracks_record_enabled(bool);
 
 	void maybe_write_autosave ();
@@ -1045,6 +1046,8 @@ class LIBARDOUR_API Session : public PBD::StatefulDestructible, public PBD::Scop
 
 	void reconnect_ltc_input ();
 	void reconnect_ltc_output ();
+
+	VCAManager& vca_manager() { return *_vca_manager; }
 
   protected:
 	friend class AudioEngine;
@@ -1849,6 +1852,8 @@ class LIBARDOUR_API Session : public PBD::StatefulDestructible, public PBD::Scop
 	static const uint32_t session_end_shift;
 
 	std::string _template_state_dir;
+
+	VCAManager* _vca_manager;
 };
 
 

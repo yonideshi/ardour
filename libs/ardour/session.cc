@@ -102,6 +102,7 @@
 #include "ardour/track.h"
 #include "ardour/user_bundle.h"
 #include "ardour/utils.h"
+#include "ardour/vca_manager.h"
 
 #include "midi++/port.h"
 #include "midi++/mmc.h"
@@ -299,6 +300,7 @@ Session::Session (AudioEngine &eng,
 	, _scene_changer (0)
 	, _midi_ports (0)
 	, _mmc (0)
+	, _vca_manager (0)
 {
 	uint32_t sr = 0;
 
@@ -686,6 +688,7 @@ Session::destroy ()
 	delete _locations; _locations = 0;
 
 	delete _tempo_map;
+	delete _vca_manager;
 
 	DEBUG_TRACE (DEBUG::Destruction, "Session::destroy() done\n");
 
