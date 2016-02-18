@@ -1588,6 +1588,13 @@ MixerStrip::build_route_ops_menu ()
 	i->signal_activate().connect (sigc::bind (sigc::mem_fun (*this, &RouteUI::set_route_active), !_route->active(), false));
 
 	items.push_back (SeparatorElem());
+	items.push_back (CheckMenuElem (_("Prefer Mono")));
+	i = dynamic_cast<Gtk::CheckMenuItem *> (&items.back());
+	i->set_active (_route->keep_mono());
+	i->set_sensitive(_route->n_inputs ().get (DataType::AUDIO) == 1);
+	i->signal_activate().connect (sigc::hide_return (sigc::bind (sigc::mem_fun (*_route, &Route::set_keep_mono), !_route->keep_mono())));
+
+	items.push_back (SeparatorElem());
 
 	items.push_back (MenuElem (_("Adjust Latency..."), sigc::mem_fun (*this, &RouteUI::adjust_latency)));
 

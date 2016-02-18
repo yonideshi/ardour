@@ -879,6 +879,8 @@ PluginInsertProcessorEntry::plugin_insert_splitting_changed ()
 	 * equal _plugin_insert->output_streams())
 	 */
 	_output_icon.set_ports(out);
+
+	// TODO handle _plugin_insert->monoized()
 #ifndef NDEBUG
 	if (out != _plugin_insert->output_streams()) {
 		std::cerr << "Processor Wiring: " <<  processor()->name()
