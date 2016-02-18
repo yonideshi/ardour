@@ -67,6 +67,8 @@ PluginInsert::PluginInsert (Session& s, boost::shared_ptr<Plugin> plug)
 	: Processor (s, (plug ? plug->name() : string ("toBeRenamed")))
 	, _signal_analysis_collected_nframes(0)
 	, _signal_analysis_collect_nframes_max(0)
+	, _monoize (false)
+	, _monoized (false)
 {
 	/* the first is the master */
 
@@ -137,7 +139,11 @@ PluginInsert::output_streams() const
 
 	PluginInfoPtr info = _plugins.front()->get_info();
 
-	if (info->reconfigurable_io()) {
+	if (_monoized) {
+		ChanCount out (DataType::AUDIO, 1);
+		return out;
+	}
+	else if (info->reconfigurable_io()) {
 		ChanCount out = _plugins.front()->output_streams ();
 		// DEBUG_TRACE (DEBUG::Processors, string_compose ("Plugin insert, reconfigur(able) output streams = %1\n", out));
 		return out;
@@ -790,6 +796,7 @@ PluginInsert::can_support_io_configuration (const ChanCount& in, ChanCount& out)
 PluginInsert::Match
 PluginInsert::private_can_support_io_configuration (ChanCount const & inx, ChanCount& out)
 {
+	_monoized = false;
 	if (_plugins.empty()) {
 		return Match();
 	}
@@ -882,6 +889,10 @@ PluginInsert::private_can_support_io_configuration (ChanCount const & inx, ChanC
 		return Match (Replicate, f);
 	}
 
+	// TODO add a check if the processor in question
+	// can be used in "1st channel only" mode.
+	bool can_mono = true;
+
 	/* If the processor has exactly one input of a given type, and
 	   the plugin has more, we can feed the single processor input
 	   to some or all of the plugin inputs.  This is rather
@@ -890,7 +901,7 @@ PluginInsert::private_can_support_io_configuration (ChanCount const & inx, ChanC
 	   plugin inputs?  Let me count the ways ...
 	*/
 
-	bool can_split = true;
+	bool can_split = !(_monoize && can_mono);
 	for (DataType::iterator t = DataType::begin(); t != DataType::end(); ++t) {
 
 		bool const can_split_type = (in.get (*t) == 1 && inputs.get (*t) > 1);
@@ -926,7 +937,13 @@ PluginInsert::private_can_support_io_configuration (ChanCount const & inx, ChanC
 	}
 
 	if (could_hide && !cannot_hide) {
-		out = outputs + midi_bypass;
+		if (_monoize && inx.get (DataType::AUDIO) == 1
+				&& inputs.get (DataType::AUDIO) == outputs.get (DataType::AUDIO)) {
+			_monoized = true;
+			outputs = ChanCount (DataType::AUDIO, 1);
+		} else {
+			out = outputs + midi_bypass;
+		}
 		return Match (Hide, 1, hide_channels);
 	}
 

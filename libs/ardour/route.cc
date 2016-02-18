@@ -115,6 +115,7 @@ Route::Route (Session& sess, string name, Flag flg, DataType default_type)
 	, _track_number (0)
 	, _in_configure_processors (false)
 	, _initial_io_setup (false)
+	, _keep_mono (false)
 	, _custom_meter_position_noted (false)
 {
 	processor_max_streams.reset();
@@ -1245,6 +1246,13 @@ Route::add_processor (boost::shared_ptr<Processor> processor, boost::shared_ptr<
 		return 1;
 	}
 
+	if (_keep_mono) {
+		boost::shared_ptr<PluginInsert> pi;
+		if ((pi = boost::dynamic_pointer_cast<PluginInsert>(processor)) != 0) {
+			pi->monoize (true);
+		}
+	}
+
 	{
 		Glib::Threads::Mutex::Lock lx (AudioEngine::instance()->process_lock ());
 		Glib::Threads::RWLock::WriterLock lm (_processor_lock);
@@ -2278,6 +2286,46 @@ Route::reorder_processors (const ProcessorList& new_order, ProcessorStreams* err
 	return 0;
 }
 
+bool
+Route::set_keep_mono (const bool mono)
+{
+	// las: would a Flag be more appropriate than a dedicated bool?
+	if (n_inputs ().get (DataType::AUDIO) == 1) {
+		if (_keep_mono != mono) {
+			_keep_mono = mono;
+			Glib::Threads::RWLock::ReaderLock lm (_processor_lock);
+			for (ProcessorList::iterator p = _processors.begin(); p != _processors.end(); ++p) {
+				boost::shared_ptr<PluginInsert> pi;
+				if ((pi = boost::dynamic_pointer_cast<PluginInsert>(*p)) != 0) {
+					pi->monoize (_keep_mono);
+				}
+			}
+			list<pair<ChanCount, ChanCount> > c = try_configure_processors_unlocked (n_inputs (), 0);
+			if (c.empty()) {
+				// not possible
+				_keep_mono = !mono; // restore old value
+				for (ProcessorList::iterator p = _processors.begin(); p != _processors.end(); ++p) {
+					boost::shared_ptr<PluginInsert> pi;
+					if ((pi = boost::dynamic_pointer_cast<PluginInsert>(*p)) != 0) {
+						pi->monoize (_keep_mono);
+					}
+				}
+				return false;
+			}
+			lm.release ();
+			// OK. hack. this is called from the GUI thread :(
+			{
+				Glib::Threads::Mutex::Lock lx (AudioEngine::instance()->process_lock ());
+				configure_processors (0);
+			}
+			processors_changed (RouteProcessorChange ()); /* EMIT SIGNAL */
+		}
+		_session.set_dirty ();
+		return true;
+	}
+	return false;
+}
+
 XMLNode&
 Route::get_state()
 {
@@ -2306,6 +2354,7 @@ Route::state(bool full_state)
 	node->add_property("id", buf);
 	node->add_property ("name", _name);
 	node->add_property("default-type", _default_type.to_string());
+	node->add_property ("keep-mono", _keep_mono);
 
 	if (_flags) {
 		node->add_property("flags", enum_2_string (_flags));
@@ -2427,6 +2476,10 @@ Route::set_state (const XMLNode& node, int version)
 		_flags = Flag (string_2_enum (prop->value(), _flags));
 	} else {
 		_flags = Flag (0);
+	}
+
+	if ((prop = node.property (X_("keep-mono"))) != 0) {
+		_keep_mono = string_is_affirmative (prop->value());
 	}
 
 	if (is_master() || is_monitor() || is_auditioner()) {
@@ -2979,6 +3032,11 @@ Route::set_processor_state (const XMLNode& node)
 						processor.reset (new UnknownProcessor (_session, **niter));
 					} else {
 						processor.reset (new PluginInsert (_session));
+						if (_keep_mono) {
+							boost::shared_ptr<PluginInsert> pi = boost::dynamic_pointer_cast<PluginInsert>(processor);
+							pi->monoize (true);
+						}
+
 					}
 				} else if (prop->value() == "port") {
 

@@ -142,6 +142,14 @@ class LIBARDOUR_API PluginInsert : public Processor
 
 	void collect_signal_for_analysis (framecnt_t nframes);
 
+	void monoize (bool b) {
+		_monoize = b;
+	}
+
+	bool monoized () const {
+		return _monoized;
+	}
+
 	bool splitting () const {
 		return _match.method == Split;
 	}
@@ -189,6 +197,9 @@ class LIBARDOUR_API PluginInsert : public Processor
 
 	ChanCount _configured_in;
 	ChanCount _configured_out;
+
+	bool _monoize;
+	bool _monoized;
 
 	/** Description of how we can match our plugin's IO to our own insert IO */
 	struct Match {

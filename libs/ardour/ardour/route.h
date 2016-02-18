@@ -273,6 +273,9 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 	void clear_processors (Placement);
 	void all_visible_processors_active (bool);
 
+	bool keep_mono () const { return _keep_mono; }
+	bool set_keep_mono (bool);
+
 	framecnt_t set_private_port_latencies (bool playback) const;
 	void       set_public_port_latencies (framecnt_t, bool playback) const;
 
@@ -831,6 +834,8 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 	};
 
 	friend class ProcessorState;
+
+	bool _keep_mono;
 
 	/* no copy construction */
 	Route (Route const &);
