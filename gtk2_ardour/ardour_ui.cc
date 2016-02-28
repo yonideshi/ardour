@@ -90,6 +90,7 @@
 #include "ardour/source_factory.h"
 #include "ardour/slave.h"
 #include "ardour/system_exec.h"
+#include "ardour/vca_manager.h"
 
 #include "LuaBridge/LuaBridge.h"
 
@@ -1776,6 +1777,15 @@ ARDOUR_UI::open_session ()
 	}
 }
 
+void
+ARDOUR_UI::session_add_vca (const string& name_template)
+{
+	if (!_session) {
+		return;
+	}
+
+	_session->vca_manager().create_vca (name_template);
+}
 
 void
 ARDOUR_UI::session_add_mixed_track (const ChanCount& input, const ChanCount& output, RouteGroup* route_group,
@@ -3940,7 +3950,7 @@ ARDOUR_UI::add_route (Gtk::Window* /* ignored */)
 		session_add_audio_bus (input_chan.n_audio(), output_chan.n_audio(), route_group, count, name_template);
 		break;
 	case AddRouteDialog::VCAMaster:
-		/* do something */
+		session_add_vca (name_template);
 		break;
 	}
 }

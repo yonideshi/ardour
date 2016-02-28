@@ -272,6 +272,8 @@ class ARDOUR_UI : public Gtkmm2ext::UI, public ARDOUR::SessionHandlePtr
 	void flush_videotimeline_cache (bool localcacheonly=false);
 	void export_video (bool range = false);
 
+	void session_add_vca (std::string const &);
+
 	void session_add_audio_track (
 		int input_channels,
 		int32_t output_channels,
