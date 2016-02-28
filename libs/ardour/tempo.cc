@@ -499,7 +499,7 @@ MeterSection::MeterSection (const XMLNode& node)
 		    &bbt.beats,
 		    &bbt.ticks) < 3) {
 		error << _("MeterSection XML node has an illegal \"bbt\" value") << endmsg;
-		throw failed_constructor();
+		//throw failed_constructor();
 	}
 
 	start.second = bbt;
@@ -522,9 +522,8 @@ MeterSection::MeterSection (const XMLNode& node)
 			throw failed_constructor();
 		}
 	}
-
 	if (sscanf (prop->value().c_str(), "%lf", &_divisions_per_bar) != 1 || _divisions_per_bar < 0.0) {
-		error << _("MeterSection XML node has an illegal \"beats-per-bar\" or \"divisions-per-bar\" value") << endmsg;
+		error << _("MeterSection XML node has an illegal \"divisions-per-bar\" value") << endmsg;
 		throw failed_constructor();
 	}
 
@@ -532,7 +531,6 @@ MeterSection::MeterSection (const XMLNode& node)
 		error << _("MeterSection XML node has no \"note-type\" property") << endmsg;
 		throw failed_constructor();
 	}
-
 	if (sscanf (prop->value().c_str(), "%lf", &_note_type) != 1 || _note_type < 0.0) {
 		error << _("MeterSection XML node has an illegal \"note-type\" value") << endmsg;
 		throw failed_constructor();
@@ -540,7 +538,6 @@ MeterSection::MeterSection (const XMLNode& node)
 
 	if ((prop = node.property ("lock-style")) == 0) {
 		warning << _("MeterSection XML node has no \"lock-style\" property") << endmsg;
-		//throw failed_constructor();
 		set_position_lock_style (PositionLockStyle::MusicTime);
 	} else {
 		set_position_lock_style (PositionLockStyle (string_2_enum (prop->value(), position_lock_style())));
@@ -569,9 +566,9 @@ MeterSection::get_state() const
 	snprintf (buf, sizeof (buf), "%lf", beat());
 	root->add_property ("beat", buf);
 	snprintf (buf, sizeof (buf), "%f", _note_type);
-	root->add_property ("frame", buf);
-	snprintf (buf, sizeof (buf), "%li", frame());
 	root->add_property ("note-type", buf);
+	snprintf (buf, sizeof (buf), "%li", frame());
+	root->add_property ("frame", buf);
 	root->add_property ("lock-style", enum_2_string (position_lock_style()));
 	snprintf (buf, sizeof (buf), "%f", _divisions_per_bar);
 	root->add_property ("divisions-per-bar", buf);
