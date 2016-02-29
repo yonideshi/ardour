@@ -1274,6 +1274,8 @@ Mixer_UI::initial_track_display ()
 		Unwinder<bool> uw2 (ignore_reorder, true);
 
 		track_model->clear ();
+		VCAList vcas = _session->vca_manager().vcas();
+		add_masters (vcas);
 		add_strips (copy);
 	}
 
