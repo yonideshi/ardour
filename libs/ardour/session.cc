@@ -659,6 +659,11 @@ Session::destroy ()
 	DEBUG_TRACE (DEBUG::Destruction, "delete regions\n");
 	RegionFactory::delete_all_regions ();
 
+	/* Do this early so that VCAs no longer hold references to routes */
+
+	DEBUG_TRACE (DEBUG::Destruction, "delete vcas\n");
+	delete _vca_manager;
+
 	DEBUG_TRACE (DEBUG::Destruction, "delete routes\n");
 
 	/* reset these three references to special routes before we do the usual route delete thing */
@@ -707,7 +712,6 @@ Session::destroy ()
 	delete _locations; _locations = 0;
 
 	delete _tempo_map;
-	delete _vca_manager;
 
 	DEBUG_TRACE (DEBUG::Destruction, "Session::destroy() done\n");
 
