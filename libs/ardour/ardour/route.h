@@ -69,6 +69,7 @@ class MonitorProcessor;
 class Pannable;
 class CapturingProcessor;
 class InternalSend;
+class VCA;
 
 class LIBARDOUR_API Route : public SessionObject, public Automatable, public RouteGroupMember, public GraphNode, public boost::enable_shared_from_this<Route>
 {
@@ -632,6 +633,8 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
         */
         void monitor_run (framepos_t start_frame, framepos_t end_frame,
 			  pframes_t nframes, int declick);
+
+        bool slaved_to (boost::shared_ptr<VCA>) const;
 
   protected:
 	friend class Session;
