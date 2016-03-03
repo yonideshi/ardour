@@ -914,9 +914,7 @@ Metrics
 TempoMap::get_new_order (TempoSection* section, const Tempo& bpm, const framepos_t& frame)
 {
 	Metrics imaginary (metrics);
-
 	TempoSection* prev_ts = 0;
-	TempoSection* t;
 
 	/*set frame and sort */
 	section->set_frame (frame);
@@ -925,6 +923,7 @@ TempoMap::get_new_order (TempoSection* section, const Tempo& bpm, const framepos
 
 	/* recompute tempos */
 	for (Metrics::iterator i = imaginary.begin(); i != imaginary.end(); ++i) {
+		TempoSection* t;
 		if ((t = dynamic_cast<TempoSection*> (*i)) != 0) {
 			if (prev_ts) {
 				if (t == section) {
@@ -972,9 +971,7 @@ Metrics
 TempoMap::get_new_order (TempoSection* section, const Tempo& bpm, const double& beat)
 {
 	Metrics imaginary (metrics);
-
 	TempoSection* prev_ts = 0;
-	TempoSection* t;
 
 	/*set beat and sort */
 	section->set_beat (beat);
@@ -983,6 +980,7 @@ TempoMap::get_new_order (TempoSection* section, const Tempo& bpm, const double& 
 
 	/* recompute tempo positions */
 	for (Metrics::iterator i = imaginary.begin(); i != imaginary.end(); ++i) {
+		TempoSection* t;
 		if ((t = dynamic_cast<TempoSection*> (*i)) != 0) {
 			if (prev_ts) {
 				if (t == section) {
@@ -1099,11 +1097,11 @@ TempoMap::get_new_order(MeterSection* section, const Meter& mt, const framepos_t
 }
 
 /**
-* This is for a gui that needs to know the frame of a beat if a tempo section were to be moved or altered.
+* This is for a gui that needs to know the frame of an audio-locked tempo section if it were to be placed at some beat.
 * It actually reorders and partially recomputes tha ramps, so calling this commits you to replacing the section immediately.
 * It will not emit a signal as you probably want to replace the tempo or do somethig else before that happens.
 * @param section - the section you want to alter
-* @param bpm - the new tempo
+* @param bpm - the new Tempo
 * @param beat - the beat where the altered tempo will fall
 * @return returns - the position in frames where the new tempo section will lie.
 */
