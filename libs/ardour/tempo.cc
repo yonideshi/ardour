@@ -1833,6 +1833,7 @@ TempoMap::solve_map (Metrics& imaginary, TempoSection* section, const Tempo& bpm
 		return true;
 	}
 
+	/*
 	TempoSection* prev_ts = 0;
 	std::cerr << "dumping beat order ------" << std::endl;
 	std::cerr << "section    : " << section->beats_per_minute() << " | " << section->beat() << " | " << section->frame() << std::endl;
@@ -1854,6 +1855,7 @@ TempoMap::solve_map (Metrics& imaginary, TempoSection* section, const Tempo& bpm
 	}
 	std::cerr << "end dump ------";
 	prev_ts = 0;
+	*/
 
 	return false;
 }
