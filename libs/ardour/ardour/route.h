@@ -48,6 +48,7 @@
 #include "ardour/types.h"
 #include "ardour/mute_master.h"
 #include "ardour/route_group_member.h"
+#include "ardour/stripable.h"
 #include "ardour/graphnode.h"
 #include "ardour/automatable.h"
 #include "ardour/unknown_processor.h"
@@ -71,7 +72,7 @@ class CapturingProcessor;
 class InternalSend;
 class VCA;
 
-class LIBARDOUR_API Route : public SessionObject, public Automatable, public RouteGroupMember, public GraphNode, public boost::enable_shared_from_this<Route>
+class LIBARDOUR_API Route : public Stripable, public Automatable, public RouteGroupMember, public GraphNode, public boost::enable_shared_from_this<Route>
 {
   public:
 
@@ -198,8 +199,8 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 
 	boost::shared_ptr<Amp> amp() const  { return _amp; }
 	boost::shared_ptr<Amp> trim() const { return _trim; }
-	PeakMeter&       peak_meter()       { return *_meter.get(); }
-	const PeakMeter& peak_meter() const { return *_meter.get(); }
+	boost::shared_ptr<PeakMeter>       peak_meter()       { return _meter; }
+	boost::shared_ptr<const PeakMeter> peak_meter() const { return _meter; }
 	boost::shared_ptr<PeakMeter> shared_peak_meter() const { return _meter; }
 	boost::shared_ptr<DelayLine> delay_line() const  { return _delayline; }
 
@@ -486,11 +487,11 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 
 	void set_control (AutomationType, double val, PBD::Controllable::GroupControlDisposition group_override);
 
-	boost::shared_ptr<SoloControllable> solo_control() const {
+	boost::shared_ptr<AutomationControl> solo_control() const {
 		return _solo_control;
 	}
 
-	boost::shared_ptr<MuteControllable> mute_control() const {
+	boost::shared_ptr<AutomationControl> mute_control() const {
 		return _mute_control;
 	}
 
@@ -498,11 +499,11 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 		return _mute_master;
 	}
 
-	boost::shared_ptr<SoloIsolateControllable> solo_isolate_control() const {
+	boost::shared_ptr<AutomationControl> solo_isolate_control() const {
 		return _solo_isolate_control;
 	}
 
-	boost::shared_ptr<SoloSafeControllable> solo_safe_control() const {
+	boost::shared_ptr<AutomationControl> solo_safe_control() const {
 		return _solo_safe_control;
 	}
 
@@ -520,11 +521,11 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 
 	boost::shared_ptr<Panner> panner() const;  /* may return null */
 	boost::shared_ptr<PannerShell> panner_shell() const;
-	boost::shared_ptr<GainControl> gain_control() const;
 	boost::shared_ptr<Pannable> pannable() const;
-	boost::shared_ptr<GainControl> trim_control() const;
 
-	boost::shared_ptr<PhaseControllable> phase_control() const;
+	boost::shared_ptr<GainControl> gain_control() const;
+	boost::shared_ptr<AutomationControl> trim_control() const;
+	boost::shared_ptr<AutomationControl> phase_control() const;
 
 	/**
 	   Return the first processor that accepts has at least one MIDI input
